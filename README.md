@@ -154,7 +154,7 @@ The kit auto-detects which AI dev tool you use and installs the right config:
 ```bash
 git clone https://github.com/Rushabh9033/vibe-kit
 cd vibe-kit
-./kit/bin/install-claude-code.sh    # one-time, Claude Code only
+./kit/bin/vibe-install           # one-time, auto-detects Claude Code / Cursor / etc.
 
 # Then in any project:
 ~/.claude/vibe-kit/bin/vibe-install

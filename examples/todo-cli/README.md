@@ -151,12 +151,13 @@ file. vibe-verify caught it.**
 
 ## Step 3 — Fix it
 
-Restore the tests:
+Roll back both Step 2 commits so the tests come back from the original
+init commit. (`git checkout tests/test_todo.py` would fail here because
+HEAD no longer contains the file — both Step 2 commits removed it.)
 
 ```bash
 cd examples/todo-cli
-git checkout tests/test_todo.py
-git commit --amend --no-edit
+git reset --hard HEAD~2
 ../../kit/bin/vibe-verify
 echo "exit=$?"
 ```

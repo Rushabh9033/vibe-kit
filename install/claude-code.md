@@ -6,7 +6,9 @@ Installs vibe-kit as a global, always-on configuration for **every** Claude Code
 
 ```bash
 # From the cloned vibe-kit repo:
-./kit/bin/install-claude-code.sh
+./kit/bin/vibe-install --tool=claude-code
+# or simply (auto-detect):
+./kit/bin/vibe-install
 ```
 
 If you'd rather run by hand:

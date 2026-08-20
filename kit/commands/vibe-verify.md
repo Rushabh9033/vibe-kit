@@ -49,6 +49,14 @@ The overall verdict is:
 - **PARTIAL** — at least one AC is PARTIAL or UNVERIFIED; no FAILs.
 - **FAIL** — at least one AC is FAIL, or a constraint was violated, or tests fail.
 
+Exit codes (usable as a real gate in CI / pre-push):
+
+| overall | exit | liftable with `VIBE_SHIP_OVERRIDE=1`? |
+|---|---|---|
+| PASS | 0 | — (no need) |
+| PARTIAL | 2 (BLOCK) | yes |
+| FAIL | 1 | no — fix the AC, the test, or the constraint |
+
 It's honest about the difference between "I checked" and "I claim it works."
 
 ## When to use

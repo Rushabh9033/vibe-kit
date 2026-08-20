@@ -8,7 +8,7 @@ Ship a feature. Run the pre-flight gate, then update the user-visible artifacts,
 
 Run `/vibe-verify` first; if it returns `overall: FAIL`, refuse to ship.
 
-- [ ] `/vibe-verify` returned `overall: PASS` (or `PARTIAL` with a documented human-review sign-off for any `? UNVERIFIED` ACs and any `! REVIEW` violations)
+- [ ] `/vibe-verify` returned `overall: PASS` (or `PARTIAL` with a documented human-review sign-off for any `? UNVERIFIED` ACs and any `! REVIEW` violations). To proceed under PARTIAL with explicit acknowledgment: set `VIBE_SHIP_OVERRIDE=1` (lifts BLOCK only — never FAIL).
 - [ ] Edge cases enumerated and tested (per spec)
 - [ ] NFRs checked (perf, a11y, security, observability)
 - [ ] lint + typecheck green

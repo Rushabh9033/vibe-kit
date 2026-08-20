@@ -25,6 +25,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com).
 - **`kit/bin/vibe-verify`** sed whitespace stripping: `sed -E 's/\s+$//'` was interpreted by BSD sed as `s/s+$//`, silently stripping trailing `s` characters from test names like `test_AC4_rm_deletes` → `test_AC4_rm_delete`. Fixed to POSIX `[[:space:]]` character class.
 - **`kit/bin/vibe-verify`** deletion handling: deleted test files were treated as "still in the diff" (PARTIAL on all ACs) rather than "evidence removed" (FAIL). Added `--diff-filter=ACMR` so a `git rm tests/test_*.py` produces the hard FAIL the demo README promises.
 - **`kit/bin/vibe-verify`** evidence counting: only `+` lines (added) were counted as test definitions. `-` lines (removed tests) were also matching because the grep didn't anchor on the diff prefix. Fixed to anchor on `^\+` AND context lines (` ` prefix), so deletions correctly produce PARTIAL and unchanged tests still produce PASS.
+- **`README.md`** + **`install/claude-code.md`** referenced the non-existent `./kit/bin/install-claude-code.sh`. Replaced with the real `./kit/bin/vibe-install` (auto-detects tool; `--tool=claude-code` overrides).
+- **`examples/todo-cli/README.md`** Step 3 used `git checkout tests/test_todo.py`, which fails when HEAD no longer contains the file (both Step 2 commits removed it). Replaced with `git reset --hard HEAD~2`, which rolls both Step 2 commits back to the original init.
+- **`kit/commands/vibe-verify.md`** did not document the gate's exit-code table. Added the PASS=0 / PARTIAL=2 (BLOCK) / FAIL=1 table with explicit `VIBE_SHIP_OVERRIDE=1` liftability column.
+- **`kit/commands/vibe-ship.md`** did not mention the `VIBE_SHIP_OVERRIDE=1` escape hatch. Added a single line clarifying that the override lifts BLOCK only, never FAIL.
 
 ## [0.3.1] - 2026-08-20
 
