@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# vibe-pre-push — opt-in git pre-push hook that runs vibe-verify
+#
+# Installed by `kit/bin/vibe-init` when invoked with --enable-pre-push,
+# or manually with:
+#   cp kit/bin/hooks/vibe-pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+#
+# Behavior:
+#   - Runs vibe-verify on every push.
+#   - Exits non-zero if vibe-verify exits non-zero (i.e. FAIL or BLOCK).
+#   - VIBE_SHIP_OVERRIDE=1 lifts BLOCK (PARTIAL / UNVERIFIED) but NOT FAIL.
+#   - Skips verify if --no-verify flag is passed to `git push --no-verify`.
+#
+# This is a gate, not a jail. The override exists so that the human remains
+# in charge; the gate exists so that "I forgot to verify" doesn't happen
+# silently.
+
+set -uo pipefail
+
+# Skip if push was invoked with --no-verify.
+for arg in "$@"; do
+  if [ "$arg" = "--no-verify" ]; then
+    exit 0
+  fi
+done
+
+# Locate vibe-verify (project install takes priority over global install).
+if   [ -x "./kit/bin/vibe-verify" ]; then
+  VIBE_VERIFY="./kit/bin/vibe-verify"
+elif [ -x "$HOME/.claude/vibe-kit/bin/vibe-verify" ]; then
+  VIBE_VERIFY="$HOME/.claude/vibe-kit/bin/vibe-verify"
+else
+  echo "vibe-pre-push: vibe-verify not installed; skipping" >&2
+  exit 0
+fi
+
+echo "vibe-pre-push: running vibe-verify..."
+echo
+
+# Run verify, capture output for the report.
+out_file="$(mktemp)"
+"$VIBE_VERIFY" >"$out_file" 2>&1
+rc=$?
+
+# Print the report so the user sees what fired.
+cat "$out_file"
+
+echo
+case "$rc" in
+  0) echo "vibe-pre-push: PASS — pushing."; rm -f "$out_file"; exit 0 ;;
+  1) echo "vibe-pre-push: FAIL — refusing push."
+     echo "  fix: implement missing ACs, repair tests, or correct the constraint violation."
+     echo "  override: FAIL cannot be overridden; fix and re-push."
+     rm -f "$out_file"
+     exit 1 ;;
+  2) if [ "${VIBE_SHIP_OVERRIDE:-}" = "1" ]; then
+       echo "vibe-pre-push: BLOCK lifted by VIBE_SHIP_OVERRIDE=1 — pushing with documented human sign-off."
+       rm -f "$out_file"
+       exit 0
+     fi
+     echo "vibe-pre-push: BLOCK — refusing push."
+     echo "  review: PARTIAL items need tests; UNVERIFIED items need human review."
+     echo "  override: re-run with VIBE_SHIP_OVERRIDE=1 env var if the gaps are intentional."
+     rm -f "$out_file"
+     exit 1 ;;
+  *) echo "vibe-pre-push: vibe-verify errored (rc=$rc); refusing push." >&2
+     rm -f "$out_file"
+     exit 1 ;;
+esac

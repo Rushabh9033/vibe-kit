@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+# vibe-classify — deterministic ceremony classifier
+#
+# Reads git status / diff and recommends one of:
+#   tiny      — diff < ~30 lines, < 3 files, no sensitive paths
+#   normal    — typical feature or behavior change
+#   large     — many files, schema/architecture changes
+#   critical  — auth, billing, security, secrets, destructive migrations
+#
+# Deterministic rules only (no AI). Conservative: when in doubt, recommend
+# the heavier ceremony. This script RECOMMENDS — it does not enforce.
+# The user (or /vibe-ship) decides whether to follow the recommendation.
+#
+# Usage:
+#   vibe-classify                 # classify working-tree diff vs HEAD
+#   vibe-classify <base>..<head>  # classify an explicit range
+#
+# Output (one line, machine-parseable):
+#   <level> | <reason> | <files-touched> | <lines-changed>
+# Plus a human-readable block.
+
+set -uo pipefail
+
+CWD="$(pwd)"
+
+# ---------- helpers ----------
+
+die() { echo "vibe-classify: $*" >&2; exit 2; }
+
+command -v git >/dev/null || die "git not found"
+
+# Patterns that indicate sensitive areas. Critical ceremony if any file matches.
+SENSITIVE_PATTERNS='(^|/)(auth|authorization|authentication|login|session|oauth|jwt|password|secret|credentials|api[_-]?key|token|rsa|pem|private)[._-]|/billing/|/payment|/stripe|/checkout|/security/|/secrets/|/cryptography/|/crypto/|/audit[_-]?log|/compliance/'
+
+# Patterns that suggest large / architectural changes.
+LARGE_PATTERNS='(^|/)(migrations?/|schema|migration)/|/db/|/database/|/models?/|/repositories/|/architecture|/infrastructure|/terraform|/k8s|/kubernetes|/docker-compose|/proto/'
+
+# Compute diff stats. Args: <base> <head> (defaults: HEAD~1..HEAD, or working tree)
+compute_stats() {
+  local base="${1:-}" head="${2:-}"
+  DIFF_NAMES=""
+  DIFF_STATS=""
+
+  if [ -n "$base" ] && [ -n "$head" ]; then
+    DIFF_NAMES="$(git -C "$CWD" diff --name-only "$base" "$head" 2>/dev/null || true)"
+    DIFF_STATS="$(git -C "$CWD" diff --shortstat "$base" "$head" 2>/dev/null || true)"
+  elif git -C "$CWD" rev-parse HEAD >/dev/null 2>&1; then
+    # Working tree vs HEAD (staged + unstaged).
+    DIFF_NAMES="$( { git -C "$CWD" diff --name-only HEAD 2>/dev/null; \
+                     git -C "$CWD" diff --name-only --cached 2>/dev/null; \
+                     git -C "$CWD" ls-files --others --exclude-standard 2>/dev/null; } \
+                   | awk 'NF' | sort -u)"
+    DIFF_STATS="$(git -C "$CWD" diff --shortstat HEAD 2>/dev/null || true)"
+  fi
+}
+
+# Parse git diff --shortstat output: "N files changed, M insertions(+), K deletions(-)"
+parse_shortstat() {
+  local s="$1"
+  FILES_CHANGED="$(printf '%s' "$s" | sed -nE 's/([0-9]+) files? changed.*/\1/p' || true)"
+  INSERTIONS="$(printf '%s' "$s" | sed -nE 's/.* ([0-9]+) insertions?\(\+\).*/\1/p' || true)"
+  DELETIONS="$(printf '%s' "$s" | sed -nE 's/.* ([0-9]+) deletions?\(-\).*/\1/p' || true)"
+  if [ -z "$FILES_CHANGED" ]; then
+    FILES_CHANGED="$(printf '%s' "$DIFF_NAMES" | awk 'NF{c++} END{print c+0}')"
+  fi
+  INSERTIONS="${INSERTIONS:-0}"
+  DELETIONS="${DELETIONS:-0}"
+  FILES_CHANGED="${FILES_CHANGED:-0}"
+  LINES_CHANGED=$((INSERTIONS + DELETIONS))
+}
+
+# ---------- classification ----------
+
+classify() {
+  local names="$1"
+  local n_files n_lines
+  n_files="$(printf '%s' "$names" | awk 'NF{c++} END{print c+0}')"
+  n_lines="$LINES_CHANGED"
+
+  local has_sensitive has_large
+  has_sensitive="$(printf '%s' "$names" | grep -iE "$SENSITIVE_PATTERNS" | head -1)"
+  has_large="$(printf '%s' "$names" | grep -iE "$LARGE_PATTERNS" | head -1)"
+
+  if [ -n "$has_sensitive" ]; then
+    echo "critical|$has_sensitive matches sensitive-path pattern|$n_files|$n_lines"
+    return
+  fi
+  if [ -n "$has_large" ] || [ "$n_files" -ge 15 ] || [ "$n_lines" -ge 500 ]; then
+    echo "large|$n_files files, $n_lines lines|$n_files|$n_lines"
+    return
+  fi
+  if [ "$n_files" -le 3 ] && [ "$n_lines" -le 30 ]; then
+    echo "tiny|$n_files files, $n_lines lines|$n_files|$n_lines"
+    return
+  fi
+  echo "normal|$n_files files, $n_lines lines|$n_files|$n_lines"
+}
+
+# ---------- main ----------
+
+main() {
+  cd "$CWD" || die "cannot cd"
+
+  # Determine the diff range.
+  local range="${1:-}"
+  if [ -n "$range" ]; then
+    case "$range" in
+      *..*)
+        local base="${range%..*}"
+        local head="${range#*..}"
+        compute_stats "$base" "$head"
+        ;;
+      *) die "range must be BASE..HEAD (e.g. main..HEAD)" ;;
+    esac
+  else
+    compute_stats
+  fi
+
+  parse_shortstat "$DIFF_STATS"
+
+  local result level reason files_t lines_t
+  result="$(classify "$DIFF_NAMES")"
+  IFS='|' read -r level reason files_t lines_t <<< "$result"
+
+  # ---------- human-readable output ----------
+  echo "## Ceremony recommendation: $level"
+  echo
+  echo "  reason:    $reason"
+  echo "  files:     ${FILES_CHANGED:-0}"
+  echo "  ±lines:    ${INSERTIONS:-0} / ${DELETIONS:-0}"
+  echo
+  case "$level" in
+    tiny)
+      cat <<'EOF'
+  Recommended workflow:
+    [ ] quick spec or one-line note (skip the full template)
+    [ ] one test for the change (or skip if obvious)
+    [ ] /vibe-verify (or skip — Tiny ships without it)
+    [ ] commit directly
+
+  This is the "3-line bug fix" tier. Don't add ceremony for ceremony's sake.
+EOF
+      ;;
+    normal)
+      cat <<'EOF'
+  Recommended workflow:
+    [ ] spec.md (lite: Goal + ACs; skip Mandatory 11 if N/A)
+    [ ] /vibe-spec if feature is multi-AC
+    [ ] /vibe-verify before commit
+    [ ] /vibe-ship with CHANGELOG line
+EOF
+      ;;
+    large)
+      cat <<'EOF'
+  Recommended workflow:
+    [ ] full spec.md (all canonical sections)
+    [ ] /vibe-plan (phased; one phase per coder session)
+    [ ] /vibe-decide for irreversible choices (link ADRs)
+    [ ] /vibe-verify with mutation testing on changed code
+    [ ] /vibe-ship with explicit human review
+EOF
+      ;;
+    critical)
+      cat <<'EOF'
+  Recommended workflow:
+    [ ] full spec.md (canonical, with all edge cases)
+    [ ] /vibe-plan with explicit risk section
+    [ ] /vibe-decide for every irreversible choice (mandatory ADR)
+    [ ] human-authored auth / billing / secrets code (AI may assist, not author)
+    [ ] /vibe-verify + mutation testing + manual security review
+    [ ] /vibe-ship with two human reviewers
+    [ ] feature flag (default OFF) for any user-visible AI change
+
+  WARNING: a sensitive path was touched. Treat this as production-incident-level review.
+EOF
+      ;;
+  esac
+
+  echo
+  echo "## Files in diff"
+  if [ -z "$DIFF_NAMES" ]; then
+    echo "  (no changes)"
+  else
+    printf '%s\n' "$DIFF_NAMES" | sed 's/^/  /'
+  fi
+
+  # Machine-readable single-line output for piping.
+  echo
+  printf 'classify: %s | reason=%s | files=%s | lines=%s\n' \
+    "$level" "$reason" "$files_t" "$lines_t"
+}
+
+main "$@"

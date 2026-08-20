@@ -13,28 +13,43 @@ Saved as: `docs/requirements/profile-photo-upload/spec.md`
 **Last updated:** 2026-08-20
 **Linked milestone:** docs/SPEC.md ## M1 (Profile)
 
-## Scope
+> The Spec is the durable contract between planning and implementation.
+> When the Spec and the code disagree, the Spec wins — until the user
+> explicitly revises it.
 
-A user can upload a single profile photo. Photo is cropped to a 1:1 square at upload time, then served at four variants (32, 64, 256, 512 px) so it looks good across the app. Replaces existing photo if one is present.
+## Human approval
 
-## Not in scope
+- [x] User has read the spec end-to-end
+- [x] User has edited anything they want changed
+- [x] User has set `Status: in-progress`
+- [x] User has explicitly said "approved" or "ship it" in chat
 
-- Multiple photos / carousel.
-- Cover photo (separate feature).
-- Filters / adjustments.
-- Generated avatars (separate feature).
-- Animated formats (GIF, APNG).
+## Goal
 
-## User-facing behavior
+A user can upload a single profile photo. The photo is cropped to a 1:1
+square at upload time, then served at four variants (32, 64, 256, 512 px)
+so it looks good across the app. Replaces existing photo if one is
+present. Mobile-first. Privacy-first (EXIF GPS stripped). Idempotent
+(network drops retry safely).
 
-- User clicks "Add photo" on profile page.
-- Modal opens with file picker (drag-and-drop also supported on desktop).
-- After selecting, image is shown in a 1:1 crop preview with a position slider.
-- User can rotate 90° clockwise (single button).
-- User clicks "Save"; photo appears throughout the app within 3 seconds.
-- If a photo already exists, user sees "Replace photo" instead.
+## User Stories
 
-## API contract
+- As a **new user**, I want to **upload a profile photo from my phone**, so that **other users recognize me in the feed**.
+- As a **security-conscious user**, I want **EXIF location data stripped on upload**, so that **my home address isn't leaked from camera-roll photos**.
+- As a **user on a flaky network**, I want **a retry to not double-upload**, so that **I don't get charged twice for storage or see my photo twice in the feed**.
+- As a **mobile user**, I want **the photo to appear within 3 seconds**, so that **my profile feels responsive**.
+
+## Requirements
+
+### Functional
+
+- User can upload 1 image file (JPEG / PNG / WebP, max 10MB).
+- Server crops to 1:1 client-side, then resize-pipeline produces 4 variants server-side.
+- User can rotate 90° clockwise before save.
+- Replace existing photo atomically (no flash of empty between old and new).
+- Server returns 4 variant URLs after successful upload.
+
+### API contract
 
 - `POST /v1/users/me/photo` — multipart/form-data
   - Headers: `Authorization: Bearer <jwt>`, `Idempotency-Key: <uuid>`
@@ -52,7 +67,7 @@ A user can upload a single profile photo. Photo is cropped to a 1:1 square at up
 - `DELETE /v1/users/me/photo` — 204 on success; idempotent (also 204 if no photo exists).
 - `GET /v1/users/:id` — response includes `photo_url` and `variants`.
 
-## Data model
+### Data model
 
 - New table: `user_photos`
   - `id` UUID PK
@@ -69,20 +84,96 @@ Migrations: `0007_create_user_photos.sql` (new, additive). `0008_user_photo_stor
 
 Migration strategy: forward-only with `down` blocks; each migration reversible; rollback tested in CI.
 
-## Acceptance criteria (each = one test)
+### Non-functional
+
+| Category | Requirement | Target | Check |
+|---|---|---|---|
+| Perf | P95 round-trip for 5MB JPEG | < 5s | k6 load test in CI |
+| A11y | Crop UI keyboard-navigable | 100% | axe-core in CI |
+| Security | Auth required | 100% | SAST gate (Semgrep) |
+| Security | EXIF GPS stripped | 100% | unit test (AC7) |
+| Privacy | PII (face) not logged | 100% | log-assert in CI |
+| Privacy | Original image not stored | 100% | audit: only processed variants in S3 |
+| Observability | Upload latency, error rate, size | OTel tagged | `feature=profile-photo-upload`, `ai_assisted=false` |
+
+## Acceptance Criteria
+
+> Each AC is machine-checkable or explicitly human-judged. The Coder
+> writes one test per AC. `/vibe-verify` confirms every AC has evidence
+> by checking the `automated test:` path is in the diff and the test
+> function name appears in that file's diff (added or unchanged).
 
 - [ ] **AC1.** Uploading a 5MB JPEG returns 200 with all four variants (`32`, `64`, `256`, `512`).
+  - Verification:
+    - automated test: `tests/api/uploads.test.ts::test_AC1_upload_5mb_jpeg_returns_200_with_variants`
+    - expected behavior: response status 200; body lists 4 variant URLs
 - [ ] **AC2.** Uploading a 12MB file returns 400 `file_too_large`.
+  - Verification:
+    - automated test: `tests/api/uploads.test.ts::test_AC2_upload_12mb_returns_400_file_too_large`
+    - expected behavior: status 400; body error code `file_too_large`
 - [ ] **AC3.** Uploading a `.gif` returns 400 `unsupported_media_type`.
+  - Verification:
+    - automated test: `tests/api/uploads.test.ts::test_AC3_upload_gif_returns_400_unsupported`
+    - expected behavior: status 400; error code `unsupported_media_type`
 - [ ] **AC4.** Uploading with no `Authorization` returns 401.
+  - Verification:
+    - automated test: `tests/api/uploads.test.ts::test_AC4_upload_without_auth_returns_401`
+    - expected behavior: status 401
 - [ ] **AC5.** Re-uploading with the same `Idempotency-Key` returns the original response and does **not** create a second asset.
+  - Verification:
+    - automated test: `tests/api/uploads.test.ts::test_AC5_idempotency_key_returns_original`
+    - expected behavior: identical response body; row count for asset unchanged
 - [ ] **AC6.** After upload, the photo appears in the feed within 3 seconds (cache invalidation).
+  - Verification:
+    - automated test: `tests/integration/feed-cache.test.ts::test_AC6_upload_appears_in_feed_within_3s`
+    - expected behavior: GET /feed returns the new asset within 3s
 - [ ] **AC7.** Cropping removes EXIF GPS data (privacy).
+  - Verification:
+    - automated test: `tests/api/uploads.test.ts::test_AC7_crop_removes_exif_gps`
+    - expected behavior: output JPEG has no GPS IFD
 - [ ] **AC8.** `DELETE` removes the photo from the feed within 3 seconds.
+  - Verification:
+    - automated test: `tests/api/uploads.test.ts::test_AC8_delete_removes_from_feed_within_3s`
+    - expected behavior: GET /feed no longer lists the asset within 3s
 - [ ] **AC9.** Photo appears at 32, 64, 256, 512 px on the profile page (4 distinct URLs).
+  - Verification:
+    - automated test: `tests/web/profile.test.ts::test_AC9_profile_renders_4_variants`
+    - expected behavior: profile HTML contains 4 img tags with the expected widths
 - [ ] **AC10.** Concurrent uploads from the same user: last-write wins; earlier ones receive 409.
+  - Verification:
+    - automated test: `tests/api/uploads.test.ts::test_AC10_concurrent_uploads_conflict`
+    - expected behavior: 2 parallel POSTs; one wins, one returns 409
 
-## Edge cases (exhaustive)
+## Constraints
+
+### Hard constraints
+
+- Do NOT introduce new top-level dependencies. Use `sharp` (pinned in lockfile).
+- Do NOT modify files under `/migrations/` once committed.
+- Do NOT use `any` in TypeScript without an eslint-disable justification.
+- Do NOT hardcode secrets, URLs, or environment-specific values.
+- Do NOT touch: `src/auth/`, `src/billing/`, `src/security/`, `src/middleware/requireAuth.ts`.
+
+### AI-authored surface area
+
+AI may write (with review):
+- [x] Standard CRUD: photo CRUD endpoint, model, repo (excluding auth).
+- [x] UI scaffolding: crop modal UI (front-end only).
+- [x] Tests: most unit tests; integration test fixture helpers.
+- [ ] Doc drafts.
+
+Human must author (AI may assist):
+- [x] Auth middleware (`requireAuth`) around the endpoint.
+- [x] Migrations (down blocks).
+- [x] Sharp processing pipeline (data-loss / privacy implications).
+- [x] Rate-limiter config (cost implications).
+
+AI may NOT:
+- Add new top-level dependencies. (`sharp` already in repo.)
+- Use TypeScript `any`.
+- Bypass the auth middleware on the upload route.
+
+## Edge Cases (exhaustive)
 
 ### Mandatory 11
 
@@ -109,60 +200,35 @@ Migration strategy: forward-only with `down` blocks; each migration reversible; 
 - Rate-limit boundary: 5 uploads/minute per user; 6th request 429.
 - Storage quota: 100MB total per user; over-quota returns 422 `quota_exceeded`.
 
-## NFRs (this feature)
+## Non-Goals
 
-| Category | Requirement | Target | Check |
-|---|---|---|---|
-| Perf | P95 round-trip for 5MB JPEG | < 5s | k6 load test in CI |
-| A11y | Crop UI keyboard-navigable | 100% | axe-core in CI |
-| Security | Auth required | 100% | SAST gate (Semgrep) |
-| Security | EXIF GPS stripped | 100% | unit test (test_AC7) |
-| Privacy | PII (face) not logged | 100% | log-assert in CI |
-| Privacy | Original image not stored | 100% | audit: only processed variants in S3 |
-| Observability | Upload latency, error rate, size | OTel tagged | `feature=profile-photo-upload`, `ai_assisted=false` |
+- Multiple photos / carousel.
+- Cover photo (separate feature).
+- Filters / adjustments.
+- Generated avatars (separate feature).
+- Animated formats (GIF, APNG).
 
-## AI-authored surface area
+## Technical Decisions
 
-AI may write (with review):
-- Standard CRUD: photo CRUD endpoint, model, repo (excluding auth).
-- UI scaffolding: crop modal UI (front-end only).
-- Tests: most unit tests; integration test fixture helpers.
+- **Use `sharp` for processing** (rotate-then-crop-then-resize): owned by the existing project; locks in via pinned version. EXIF strip happens at `sharp.rotate()` before resize.
+- **Last-write-wins on concurrent uploads**: matches user expectation; 409 on the loser.
+- **Idempotency key without time window**: same `Idempotency-Key` returns original forever. Simpler than TTL.
+- **Storage quota soft (warn) for V1**: hard quota (422) flagged in next-spec.
 
-Human must author (AI may assist):
-- Auth middleware (`requireAuth`) around the endpoint.
-- Migrations (down blocks).
-- Sharp processing pipeline (data-loss / privacy implications).
-- Rate-limiter config (cost implications).
+> For irreversible decisions, write an ADR (`docs/decisions/NNNN-<slug>.md`).
+> The above are routine; deeper tradeoffs (e.g. switching to a CDN-fronted
+> signed-URL variant) would warrant an ADR.
 
-AI may not:
-- Add new top-level dependencies. (`sharp` already in repo.)
-- Use TypeScript `any`.
-- Bypass the auth middleware on the upload route.
+## Verification
 
-## Hallucination tolerance
-
-| Surface | Autonomy | Required verification | Human review trigger |
-|---|---|---|---|
-| UI / crop modal | High | axe-core, visual diff | Accessibility score drop |
-| Photo CRUD (no auth) | Medium | Integration tests pass | New endpoint, schema |
-| Sharp processing | Low | Mutation testing on AC7 | EXIF strip test failure |
-| Auth middleware | None | SAST + manual review | Always |
-| Migrations | None | Manual review | Always |
-
-## Dependencies
-
-- `users` table (existing).
-- NextAuth session middleware (existing).
-- `sharp` (existing, version pinned in lockfile).
-- S3 client (existing).
-
-## Verification plan
+### Plan
 
 - Commands: `pnpm test:unit` (Vitest), `pnpm test:integration` (Vitest + testcontainers Postgres), `pnpm lint`, `pnpm tsc --noEmit`, `pnpm audit --omit=dev`.
 - Manual: visually confirm variants in browser.
+- Mutation testing (rank 4) on `UserPhotoRepo` and sharp processing — required for Critical ceremony level.
 - Human review: @radhika before merge.
 
-## Risks
+### Risks
 
 | ID | Risk | Likelihood | Impact | Mitigation | Trigger | Owner |
 |---|---|---|---|---|---|---|
@@ -171,15 +237,14 @@ AI may not:
 | R3 | S3 outage during upload | 2 | 4 | Retry + idempotency; user-visible error | 500 spike | @radhika |
 | R4 | 10MB limit bypassed via Content-Encoding: gzip | 2 | 4 | Decode size check after body parse | Test bypass | @radhika |
 
-## Hard constraints for this feature
+### Dependencies
 
-- Do NOT introduce new top-level dependencies. Use `sharp` (pinned in lockfile).
-- Do NOT modify files under `/migrations/` once committed.
-- Do NOT use `any` in TypeScript without an eslint-disable justification.
-- Do NOT hardcode secrets, URLs, or environment-specific values.
-- Do NOT touch: `src/auth/`, `src/billing/`, `src/security/`, `src/middleware/requireAuth.ts`.
+- `users` table (existing).
+- NextAuth session middleware (existing).
+- `sharp` (existing, version pinned in lockfile).
+- S3 client (existing).
 
-## Open questions (block implementation)
+## Open questions
 
 - [ ] Q1. Is 10MB the right max? — Owner: @radhika — Due: 2026-08-22
 - [ ] Q2. Animation support deferred to V2 or hard-no forever? — Owner: @radhika

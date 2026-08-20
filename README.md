@@ -1,110 +1,221 @@
 # vibe-kit
 
-**by Rushabh Mavani** — a persistent contract for AI coding.
+**by Rushabh Mavani** — a spec-first workflow for AI-assisted software development.
 
-> vibe-kit gives coding agents a **SPEC they must implement against**, and **verifies they did**. The Planner writes the contract. The Coder signs it. The verifier checks the signature.
+> **If this is a 3-line bug fix, you don't need vibe-kit.**
+> If you've ever said *"the AI built what I asked for, but not what I meant"*, this kit exists for you.
+
+## The pain
 
 ```
-              ┌─────────────────────┐
-              │  Planner  (any AI)  │
-              │   spec, plan,       │
-              │   prompt, ADR       │
-              └──────────┬──────────┘
-                         │  spec.md (the contract)
-                         ▼
-              ┌─────────────────────┐
-              │  Coder (dev tools)  │
-              │   Claude Code,      │
-              │   Cursor, Aider,    │
-              │   Antigravity,      │
-              │   Windsurf, Codex   │
-              └──────────┬──────────┘
-                         │  code + tests
-                         ▼
-              ┌─────────────────────┐
-              │  /vibe-verify       │   ← contract checker
-              │  AC ↔ code ↔ tests  │
-              └──────────┬──────────┘
-                         │  PASS / BLOCK
-                         ▼
-              ┌─────────────────────┐
-              │  Ship               │
-              └─────────────────────┘
+You:  "Add a profile photo upload."
+AI:   builds 4 image variants, mobile-first, EXIF-stripped, idempotent,
+      rate-limited, with a crop modal UI, in the wrong place.
+You:  spend 2 hours unwinding.
 ```
 
-**Why this exists.** Claude Code, Cursor, Copilot — they all ship code from natural language. None of them ship a **contract**. vibe-kit adds the missing layer: a `spec.md` the Coder must implement against, and a verifier (`/vibe-verify`) that confirms every acceptance criterion landed.
+The failure isn't the AI. The failure is that **intent was never made specific**.
+vibe-kit forces you to write a Spec before the code exists, then makes the
+ship boundary check the code against the Spec.
 
-**Two roles. One spec.** The Planner (any chat AI — Claude.ai, ChatGPT, Gemini — or the same Claude Code session in planning mode) produces the spec. The Coder (any dev tool) consumes it. The user is the bridge.
+## The workflow
 
----
+```
+Spec  →  Code  →  Verify  →  Ship
+```
+
+That's it. Four steps. The Spec is where you decide; the Code is where
+the AI executes; Verify is where you find out whether the AI executed
+against the Spec; Ship is the boundary that holds.
+
+For larger work, supporting workflows exist (Plan, Decide, Handoff).
+You don't have to learn them. Use them when the work earns them.
+
+```
+   Human intent (vague, one line)
+        ↓
+   ┌──────────────┐
+   │  Spec        │  ← durable markdown; the source of product intent
+   │  Goal · ACs  │
+   │  Constraints │
+   └──────┬───────┘
+          │
+   ┌──────▼───────┐
+   │  Code        │  ← AI / human / both; against the Spec
+   │  + tests     │
+   └──────┬───────┘
+          │
+   ┌──────▼───────┐
+   │  Verify      │  ← /vibe-verify; checks the diff against the Spec
+   │  PASS / FAIL │  ← exits 0 / 1 — a real gate
+   │  BLOCK       │  ← exits 2 — needs human review; override with VIBE_SHIP_OVERRIDE
+   └──────┬───────�
+          │
+   ┌──────▼───────┐
+   │  Ship        │  ← /vibe-ship + pre-push hook (opt-in)
+   └──────────────┘
+```
+
+**See it in action**: [`examples/todo-cli/`](examples/todo-cli/) is a runnable demo.
+Spec, implementation, verify output, a deliberate ship-blocker, and the fix.
+
+## What this kit does NOT do
+
+- It does **not** make the Spec self-enforce. The Spec is markdown; markdown cannot block a push on its own. Enforcement comes from the **verify + ship** boundary (see below).
+- It does **not** prove the code is correct. `vibe-verify` is an evidence/tripwire system: it catches missing tests, missing implementations, and constraint violations. It cannot prove a test exercises the AC. Use mutation testing (rank 4) for that.
+- It does **not** connect the Planner and the Coder automatically. The user is the bridge. The Planner writes a Spec; the user pastes it into the Coder tool.
+- It does **not** own your repository. The pre-push hook is opt-in. `git push --no-verify` and `VIBE_SHIP_OVERRIDE=1` are escape hatches, documented.
+
+## Ceremony scales with the work
+
+The kit recommends the workflow based on the diff — you don't pick. Run:
+
+```bash
+vibe-classify                # tiny | normal | large | critical
+```
+
+It looks at: diff size, files touched, and whether the diff touches
+sensitive paths (`/auth/`, `/billing/`, `/secrets/`, etc.). Conservative
+defaults — when in doubt it recommends the heavier ceremony.
+
+| Level | When (auto-detected) | Pipeline |
+|---|---|---|
+| **tiny** | < 3 files, < 30 lines, no sensitive paths | edit → commit (skip the kit) |
+| **normal** | typical feature change | spec.md (lite) → code → /vibe-verify → /vibe-ship |
+| **large** | ≥ 15 files or ≥ 500 lines, or schema/architecture | full spec → /vibe-plan → code → /vibe-verify → /vibe-ship |
+| **critical** | auth / billing / secrets / destructive migrations | full spec + /vibe-decide (mandatory) + mutation testing + 2 reviewers |
+
+The Mandatory 11 edge-case thinking is **valuable**. It's a checklist for
+your brain, not a section to fill in on every change. Use it for Normal
+and above. Skip it for Tiny.
+
+## The Spec — what it is, and what it isn't
+
+The Spec is **markdown**. It's durable (lives in git), human-readable,
+and tool-agnostic. It captures product intent at a level that survives
+context loss.
+
+What it has:
+- Goal (one paragraph)
+- Acceptance Criteria (each AC = one test)
+- Constraints (what you may NOT do)
+- Edge Cases (the failure modes you must think about)
+- Non-Goals (what this feature is NOT)
+- Verification (how you'll know it works)
+
+What it doesn't have:
+- Implementation details (that's the Coder's job)
+- Code snippets (the Spec is not pseudocode)
+- Marketing language
+
+Template: [`kit/templates/requirements-spec.md`](kit/templates/requirements-spec.md).
+Two Specs exist at different levels — see [Templates](#templates).
+
+## Verify — the actual gate
+
+`vibe-verify` extracts ACs from `docs/requirements/<feature>/spec.md`
+and checks the git diff against each. Honest status model:
+
+| Status | Meaning | Exit code |
+|---|---|---|
+| **PASS** | evidence in the diff for the AC | 0 |
+| **FAIL** | no evidence | 1 |
+| **BLOCK** | PARTIAL or UNVERIFIED — needs human review | 2 |
+| (config error) | bad spec path, no git, etc. | 3 |
+
+**`VIBE_SHIP_OVERRIDE=1`** lifts BLOCK (2 → 0). It cannot lift FAIL.
+
+A pre-push hook is shipped (opt-in):
+
+```bash
+cp kit/bin/hooks/vibe-pre-push .git/hooks/pre-push
+chmod +x .git/hooks/pre-push
+```
+
+After install, every `git push` runs `vibe-verify` first. Exit non-zero
+refuses the push. `git push --no-verify` skips it (documented escape hatch).
+
+## Templates
+
+Two Specs at different lifecycle stages — they are NOT redundant:
+
+| Template | Lifecycle | Scope |
+|---|---|---|
+| `kit/templates/SPEC.md` | Milestone | Why this milestone; goals (SMART); MoSCoW; success metrics; non-functional requirements |
+| `kit/templates/requirements-spec.md` | Per-feature | Goal, ACs, Constraints, Edge Cases, Non-Goals, Verification for ONE feature |
+
+The milestone Spec decomposes into per-feature Specs. Each feature Spec
+is the input to its Coder session. Each feature AC is one test.
 
 ## Install
 
-The kit auto-detects which AI dev tool you use and installs the right config. Run from your project root:
+The kit auto-detects which AI dev tool you use and installs the right config:
 
 ```bash
 git clone https://github.com/Rushabh9033/vibe-kit
-# Install ~/.claude/vibe-kit/bin/ once (Claude Code only):
-./kit/bin/install-claude-code.sh
+cd vibe-kit
+./kit/bin/install-claude-code.sh    # one-time, Claude Code only
+
 # Then in any project:
 ~/.claude/vibe-kit/bin/vibe-install
 ```
 
-`vibe-install` detects Claude Code / Cursor / Antigravity / Aider / Codex by env vars and cwd files, then drops the right rules + commands + conventions file into your project. It also runs `vibe-init` to scaffold `docs/`, `.github/`, and `.gitignore` — **skipping files that already exist**, so it's safe to run in a project that's already in development.
+`vibe-install` detects Claude Code / Cursor / Antigravity / Aider / Codex
+by env vars and cwd files, then drops the right rules + commands +
+conventions file into your project. It also runs `vibe-init` to scaffold
+`docs/`, `.github/`, and `.gitignore` — **skipping files that already
+exist**, so it's safe to run in a project that's already in development.
 
-Override detection with `--tool=cursor` (or `antigravity`, `aider`, `codex`, `claude-code`, `generic`). For tool-specific quirks (Cursor's `@-mentions`, Aider's command-flag aliases, Antigravity's auto-format), see `install/<your-tool>.md`.
-
----
-
-## Quick start
-
-```bash
-# 1. In any chat AI (or Claude Code in planning mode):
-#    Run prompts/00-anchor.md → interview + spec.md
-
-# 2. In your project, with the Coder tool:
-/vibe-plan profile-photo-upload        # writes plan.md
-# ... implement ...
-/vibe-verify                          # AC↔code↔tests contract check
-/vibe-ship                            # CHANGELOG + handoff + ready-to-commit
-```
-
-The Planner is an **interviewer**, not a stenographer. You give it the seed idea; it asks you the rest of the questions, one at a time, until the spec is complete. (See `prompts/00-anchor.md` § Discovery protocol.)
-
----
+Override detection with `--tool=cursor` (or `antigravity`, `aider`,
+`codex`, `claude-code`, `generic`). For tool-specific quirks, see
+`install/<your-tool>.md`.
 
 ## What's in the box
 
 ```
 vibe-kit/
-├── prompts/                 ← Planner-side (any chat AI)
-│   ├── 00-anchor.md         ← Discovery protocol + role
-│   ├── 01–07                ← spec, plan, ADR, edges, handoff, retro
+├── prompts/                    ← Planner-side prompts (any chat AI)
+│   ├── 00-anchor.md            ← Discovery protocol + role boundary
+│   └── 01–07                   ← spec, plan, ADR, edges, handoff, retro
 ├── kit/
-│   ├── bin/vibe-install        ← unified installer (auto-detects tool)
-│   ├── bin/vibe-detect-tool    ← auto-detect: claude-code|cursor|antigravity|aider|codex|generic
-│   ├── bin/vibe-verify         ← AC↔code↔tests contract checker
-│   ├── bin/vibe-init           ← scaffolds a project (skips existing files)
-│   ├── bin/hooks/              ← format-on-edit, guard-unsafe, handoff
-│   ├── commands/               ← 8 slash commands
-│   ├── rules/                  ← 5 modular rules (security, verify, cost…)
-│   ├── installers/             ← per-tool skill packs (claude-code, cursor, aider, antigravity, codex, generic)
-│   └── templates/              ← 10 project templates
-├── install/                    ← per-tool install guides + auto-detect matrix
-├── skills/vibe-kit/         ← packaged Claude Code Skill
-├── docs/                    ← playbook, architecture, gap-analysis
-└── examples/                ← intake, spec, plan, handoff samples
+│   ├── bin/
+│   │   ├── vibe-install        ← unified installer (auto-detects tool)
+│   │   ├── vibe-detect-tool    ← auto-detect claude-code|cursor|aider|...
+│   │   ├── vibe-verify         ← Spec ↔ code ↔ tests contract checker
+│   │   ├── vibe-classify       ← diff → tiny|normal|large|critical
+│   │   ├── vibe-init           ← scaffolds a project
+│   │   └── hooks/              ← format-on-edit, guard-unsafe, handoff, pre-push
+│   ├── commands/               ← /vibe-* slash commands
+│   ├── rules/                  ← modular rules (security, verify, cost)
+│   ├── installers/             ← per-tool skill packs
+│   └── templates/              ← Spec, plan, ADR, handoff, CHANGELOG
+├── install/                    ← per-tool install guides
+├── skills/vibe-kit/            ← packaged Claude Code Skill
+├── docs/                       ← playbook, architecture, ceremony levels
+├── examples/                   ← intake, spec, plan, handoff samples
+│   └── todo-cli/               ← runnable Spec → Code → Verify → Ship demo
+└── tests/                      ← verify + classify tests
 ```
 
----
+## Two roles, one Spec
+
+| Role | What it does | Where it runs |
+|---|---|---|
+| **Planner** | Interviews you, surfaces ambiguity, writes the Spec | Any chat AI (Claude.ai, ChatGPT, Gemini). No file access needed. |
+| **Coder** | Reads the Spec, writes code and tests | Any dev tool with file access (Claude Code, Cursor, Aider, Antigravity, Codex). |
+
+The user is the bridge. The Planner writes `spec.md`; the user pastes
+it into the Coder tool. The Coder has no idea the Planner existed;
+the Spec is the only context that survives the hand-off.
 
 ## Principle
 
-> Specify small. Verify twice. Persist the lessons.
+> **Specify small. Verify twice. Persist the lessons.**
 
-The spec is the only artifact that survives context loss; everything else is regenerated from it.
-
----
+The Spec is the durable source of intent. Implementation, tests, ADRs,
+and handoffs are derived or changed artifacts. When in doubt, the Spec
+wins — but markdown doesn't enforce that. The **verify + ship**
+boundary does.
 
 ## License
 

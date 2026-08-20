@@ -5,6 +5,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Added — verify as a real gate + adaptive ceremony
+- **`kit/bin/vibe-verify`** — evidence-based AC verification. Each AC can carry a `Verification:` block with `automated test: <path::testname>` and `expected behavior: <text>`. The verifier checks: (a) test path is in the diff (excludes DELETED files so `git rm tests/` produces a hard FAIL), (b) `def <name>` appears in the file's diff (added or unchanged), (c) the detected test runner runs and tests pass. Falls back to keyword matching when no Verification block is given. Status model: PASS / PARTIAL / UNVERIFIED / FAIL with truthful exit codes (0 / 2 / 2 / 1). `VIBE_SHIP_OVERRIDE=1` lifts BLOCK but never FAIL.
+- **`kit/bin/vibe-classify`** — deterministic ceremony classifier. Reads `git status` / `diff`, returns tiny | normal | large | critical based on diff size + sensitive-path patterns (`/auth/`, `/billing/`, `/secrets/`, migrations). Conservative defaults: when in doubt it recommends the heavier ceremony. Outputs both human-readable and machine-parseable one-liner.
+- **`kit/bin/hooks/vibe-pre-push`** — opt-in pre-push hook. Runs `vibe-verify` before every `git push`; refuses the push on non-zero exit. `git push --no-verify` skips it (documented escape hatch). `VIBE_SHIP_OVERRIDE=1` lifts BLOCK but not FAIL.
+- **`examples/todo-cli/`** — runnable demo. Single-user Python CLI; spec.md with 6 ACs each carrying a Verification block; `src/todo.py` + `tests/test_todo.py`; README walkthrough showing PASS → BLOCK → fix → PASS, plus the hard-FAIL scenario (delete the test file entirely).
+- **`kit/templates/requirements-spec.md`** — Acceptance Criteria section now shows the per-AC `Verification:` block format with `automated test:` and `expected behavior:` fields, plus the `*(human-judged)*` syntax for ACs that explicitly need human review.
+- **`examples/planner-output-spec.md`** — every AC rewritten with its own `Verification:` block. Demonstrates how a Planner fills in test paths during the spec-writing session, before the Coder touches code.
+
+### Changed
+- **README.md** rewritten. Lead now reads *"If this is a 3-line bug fix, you don't need vibe-kit."* New pain framing ("the AI built what I asked for, but not what I meant"), primary workflow `Spec → Code → Verify → Ship`, honest "What this kit does NOT do" section (markdown doesn't self-enforce; verify is evidence, not proof; the user is the bridge). Templates section documents the SPEC.md (milestone) vs requirements-spec.md (per-feature) lifecycle split.
+- **`kit/bin/vibe-verify`** — exit codes are now a real gate. PASS=0, FAIL=1 (cannot be overridden), BLOCK=2 (liftable with `VIBE_SHIP_OVERRIDE=1`), config error=3. The pre-push hook refuses on BLOCK and FAIL.
+- **`kit/bin/vibe-verify`** — Python unittest detection added. If no `pyproject.toml` is present but `tests/test_*.py` exists, runs `python3 -m unittest discover`. Override with `VIBE_VERIFY_RUNNER`.
+- **`kit/commands/vibe-ship.md`** — fixed BLOCK → FAIL reference.
+
+### Fixed
+- **`kit/bin/vibe-verify`** AC record parsing — bash strings can't hold NUL bytes, and BWK awk on macOS silently drops `\0` in `printf` format strings. Switched the per-AC record separator from NUL to SOH (`\1`, 0x01) which BWK awk emits correctly and bash reads with `read -d $'\001'`.
+- **`kit/bin/vibe-verify`** duplicate `classify()` function: an older 2-arg version survived a previous rewrite; bash used whichever was defined last, so the per-AC verification path was silently ignored. Removed the stale duplicate.
+- **`kit/bin/vibe-verify`** sed whitespace stripping: `sed -E 's/\s+$//'` was interpreted by BSD sed as `s/s+$//`, silently stripping trailing `s` characters from test names like `test_AC4_rm_deletes` → `test_AC4_rm_delete`. Fixed to POSIX `[[:space:]]` character class.
+- **`kit/bin/vibe-verify`** deletion handling: deleted test files were treated as "still in the diff" (PARTIAL on all ACs) rather than "evidence removed" (FAIL). Added `--diff-filter=ACMR` so a `git rm tests/test_*.py` produces the hard FAIL the demo README promises.
+- **`kit/bin/vibe-verify`** evidence counting: only `+` lines (added) were counted as test definitions. `-` lines (removed tests) were also matching because the grep didn't anchor on the diff prefix. Fixed to anchor on `^\+` AND context lines (` ` prefix), so deletions correctly produce PARTIAL and unchanged tests still produce PASS.
+
+## [0.3.1] - 2026-08-20
+
 ## [0.3.1] - 2026-08-20
 ### Fixed
 - **Stop hook prompt-error loop eliminated.** The kit's `Stop` hook previously combined a `command`-type and a `prompt`-type hook. The prompt fired the assistant every Stop, asking it to fill in a stub the script had just written. When the script throttled (the common case after the first write), the assistant had no stub to fill, but the prompt kept firing — producing a visible "Stop hook error" at every turn. The fix:

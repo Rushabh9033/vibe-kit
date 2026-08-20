@@ -1,18 +1,36 @@
 #!/usr/bin/env bash
-# vibe-verify — AC↔test contract checker
+# vibe-verify — Spec ↔ code ↔ tests contract checker
 #
-# Reads the most recent docs/requirements/<feature>/spec.md, extracts
-# acceptance criteria, checks the git diff against each AC, runs the
-# detected test suite, and reports whether every AC has implementation
-# and a green test.
+# Reads the most recent docs/requirements/<feature>/spec.md, extracts:
+#   - Acceptance criteria (machinist)
+#   - Non-Goals (must NOT be implemented)
+#   - Constraints (must be respected)
 #
-# Exit codes:
-#   0  — all ACs implemented + tests pass
-#   1  — one or more ACs missing OR tests failing
-#   2  — usage / config error (no spec found, no git, etc.)
+# Then checks the git diff for evidence of each. Reports per-item status:
+#   ✓  PASS        — file matches in the diff
+#   ⚠  PARTIAL     — partial evidence (one keyword of many, or file touched but no test)
+#   ✗  FAIL        — no evidence in the diff
+#   ?  UNVERIFIED  — needs human review (e.g., human-judged AC)
+#   !  REVIEW      — needs explicit human sign-off (Non-Goal / Constraint violation)
 #
-# Output: structured contract report on stdout, full test log on stderr
-# if tests fail. Designed for human reading AND machine parsing.
+# Constraint checks (cross-cutting):
+#   - No migrations edited (unless spec says "Migration strategy: ...")
+#   - No new top-level dependencies added (manifest file changed)
+#   - Non-Goals are NOT implemented (new files matching non-goal keywords)
+#
+# Exit codes (honest, usable as a real gate):
+#   0  — overall: PASS  (every AC has evidence; tests green; no violations)
+#   1  — overall: FAIL  (any AC has FAIL, OR a constraint was violated,
+#                       OR tests fail)  → blocks ship
+#   2  — overall: BLOCK (PARTIAL or UNVERIFIED — needs human review) → blocks ship
+#   3  — usage / config error (no spec found, no git, etc.)
+#
+# VIBE_SHIP_OVERRIDE=1 (set explicitly by the ship workflow with documented
+# human sign-off) forces exit 0 even on PARTIAL/UNVERIFIED. VIBE_SHIP_OVERRIDE
+# cannot override FAIL or test failures — those require a fix, not a flag.
+#
+# Output: structured contract report on stdout, designed for human reading
+# AND machine parsing.
 
 set -uo pipefail
 
@@ -32,16 +50,158 @@ find_spec() {
   printf '%s\n' "$found"
 }
 
-# Extract ACs from spec.md. Matches:
-#   - [ ] AC1. text
-#   - [ ] **AC1**: text
-#   - [ ] AC1: text
+# Extract ACs from spec.md, including any per-AC Verification block.
+# Output: one record per AC, separated by SOH (\1, 0x01). Each record:
+#   <AC-line>>>><verification-block>
+# Where verification-block may contain lines like:
+#   automated test: <path>
+#   expected behavior: <text>
+#   manual check: <text>
+# SOH separator rationale: bash variables can't hold null bytes, but the
+# macOS/BWK awk shipped with macOS silently drops "\0" in printf formats.
+# \1 (SOH) works on BWK awk, gawk, mawk, and is safe in bash via $'\001'.
 extract_acs() {
-  grep -E '^\- \[ \] (\*\*)?AC[0-9]+' "$1" \
-    | sed -E 's/^- \[ \] //; s/^\*\*//; s/\*\*//'
+  awk 'BEGIN { ORS = "\1" }
+    /^- \[ \] .*AC[0-9]+/ {
+      if (in_ac) printf "%s>>>>%s\1", prev_ac, ver_block
+      in_ac = 1
+      prev_ac = $0
+      ver_block = ""
+      next
+    }
+    in_ac && /^    - / {
+      sub(/^    - /, "")
+      sub(/^    /, "")
+      ver_block = ver_block ? ver_block "\n" $0 : $0
+      next
+    }
+    in_ac && /^- / {
+      printf "%s>>>>%s\1", prev_ac, ver_block
+      in_ac = 0
+      next
+    }
+    END { if (in_ac) printf "%s>>>>%s\1", prev_ac, ver_block }
+  ' "$1"
 }
 
-# Extract up to 10 keyword tokens from an AC line for grep matching.
+# Parse the per-AC verification block. Returns a structured description:
+#   auto_file: <path-or-empty>     (file portion of `automated test:` value)
+#   auto_test: <name-or-empty>     (test portion after `::` if present)
+#   manual:    <true|false>
+# Strip backticks and split "path::testname" so the file path can be
+# matched against DIFF_NAMES and the test name can be searched in the diff.
+extract_verification() {
+  local block="$1"
+  local raw auto_file auto_test manual
+  raw="$(printf '%s' "$block" | sed -nE 's/^automated test: *(.+)/\1/p' | head -1)"
+  # Strip surrounding backticks / whitespace.
+  # Use POSIX character class [[:space:]] not \s — BSD sed treats \s as literal s.
+  raw="${raw#\`}"; raw="${raw%\`}"
+  raw="$(printf '%s' "$raw" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+  if [ -n "$raw" ]; then
+    if [[ "$raw" == *"::"* ]]; then
+      auto_file="${raw%%::*}"
+      auto_test="${raw##*::}"
+    else
+      auto_file="$raw"
+      auto_test=""
+    fi
+  else
+    auto_file=""
+    auto_test=""
+  fi
+  manual="$(printf '%s' "$block" | grep -ciE '^manual check:|^manual verification')"
+  printf 'auto_file=%s\nauto_test=%s\nmanual=%s\n' "${auto_file:-}" "${auto_test:-}" "${manual:-0}"
+}
+
+# Categorize an AC's evidence into PASS / PARTIAL / FAIL / UNVERIFIED.
+# Prefers explicit per-AC verification (from the spec) over keyword matching.
+# Logic:
+#   - If AC line says "human-judged"/"manual review"/"needs review" → UNVERIFIED.
+#   - If AC has a per-AC Verification block:
+#       - "manual check" or no automated test → UNVERIFIED.
+#       - automated test path present:
+#           - file in DIFF_NAMES + test symbol appears in file diff → PASS
+#           - file in DIFF_NAMES only → PARTIAL (file touched, no concrete test symbol)
+#           - file not in DIFF_NAMES → FAIL
+#   - Otherwise, fall back to keyword matching across the diff.
+classify() {
+  local hits="$1" line="$2" ver="$3"
+  if printf '%s' "$line" | grep -qiE 'human[- ]?judg|manual review|needs review|human-judged'; then
+    echo "UNVERIFIED"; return
+  fi
+
+  # Per-AC verification path.
+  if [ -n "$ver" ]; then
+    local auto_file auto_test manual_flag
+    auto_file="$(printf '%s' "$ver" | sed -nE 's/^auto_file=(.*)/\1/p')"
+    auto_test="$(printf '%s' "$ver" | sed -nE 's/^auto_test=(.*)/\1/p')"
+    manual_flag="$(printf '%s' "$ver" | sed -nE 's/^manual=(.*)/\1/p')"
+    if [ "${manual_flag:-0}" -gt 0 ] || [ -z "$auto_file" ]; then
+      echo "UNVERIFIED"; return
+    fi
+    # Is the test file in the diff?
+    if printf '%s' "$DIFF_NAMES" | grep -qxF "$auto_file"; then
+      # Look at the diff for that file. If a test name was specified, look
+      # for it (as `def <name>`). Otherwise just look for *any* new test
+      # (`def test_` or `assert` in an added line). Heuristic, not proof.
+      local file_diff has_symbol
+      file_diff="$(printf '%s' "$DIFF_TEXT" | awk -v file="$auto_file" '
+        BEGIN { in_target=0 }
+        /^diff --git/ {
+          if (in_target) exit
+          if (index($0, " b/"file) || index($0, " a/"file)) in_target=1
+          next
+        }
+        in_target { print }
+      ')"
+      # Count BOTH added (+) AND context (no prefix) test/assert lines.
+      # Only `-` lines are "evidence removed". `+` lines are "evidence added".
+      # Context lines mean "evidence unchanged from HEAD~1".
+      if [ -n "$auto_test" ]; then
+        if printf '%s' "$file_diff" \
+             | grep -vE '^-' \
+             | grep -qE "def +${auto_test}\b"; then
+          echo "PASS"; return
+        fi
+        echo "PARTIAL"; return
+      fi
+      if printf '%s' "$file_diff" \
+           | grep -vE '^-' \
+           | grep -qE 'def test_|assert'; then
+        echo "PASS"; return
+      fi
+      echo "PARTIAL"; return
+    fi
+    # Test file is NOT in the diff — fail this AC.
+    echo "FAIL"; return
+  fi
+
+  # Fallback: keyword matching.
+  if [ -n "$hits" ]; then
+    local n
+    n="$(printf '%s\n' "$hits" | awk 'NF{c++} END{print c+0}')"
+    if [ "$n" -ge 2 ]; then
+      echo "PASS"
+    else
+      echo "PARTIAL"
+    fi
+  else
+    echo "FAIL"
+  fi
+}
+
+# Extract bullets from a section (between ## heading and next ## heading).
+extract_section_bullets() {
+  local file="$1" heading="$2"
+  awk -v h="^##+ ${heading}" '
+    $0 ~ h { in_section=1; next }
+    in_section && /^##+ / { in_section=0 }
+    in_section && /^- / { sub(/^- /, ""); print }
+  ' "$file"
+}
+
+# Extract up to 10 keyword tokens from a line for grep matching.
 # Adds singular form for plural tokens ("uploads" → also "upload") so an
 # AC about "uploads" matches a file called upload.ts.
 extract_keywords() {
@@ -51,14 +211,20 @@ extract_keywords() {
     | tr '[:upper:]' '[:lower:]' \
     | tr -cs 'a-z0-9_' '\n' \
     | awk 'length($0) >= 3' \
-    | grep -vE '^(with|from|that|this|when|then|than|have|has|been|will|would|could|should|must|also|such|each|every|into|over|after|before|because|user|users|input|output|value|values|edge|case|cases|return|returns|status|with)$' \
+    | grep -vE '^(with|from|that|this|when|then|than|have|has|been|will|would|could|should|must|also|such|each|every|into|over|after|before|because|user|users|input|output|value|values|edge|case|cases|return|returns|status|where|which|using|used|require|requires|required|create|creates|created|provide|provides|provided|allow|allows|allowed|support|supports|supported|response|responses|request|requests|include|includes|including)$' \
     | awk '{print; if (substr($0,length)=="s") print substr($0,1,length-1)}' \
     | head -10 \
     | paste -sd '|' -
 }
 
 # Detect the project's test runner. Returns the command or "" if unknown.
+# Detection order: manifest-declared first, then directory heuristics.
+# Note: detection is best-effort; override with VIBE_VERIFY_RUNNER env var.
 detect_runner() {
+  if [ -n "${VIBE_VERIFY_RUNNER:-}" ]; then
+    printf '%s\n' "$VIBE_VERIFY_RUNNER"
+    return
+  fi
   if   [ -f "$CWD/package.json" ]; then
     if grep -q '"jest"'    "$CWD/package.json" 2>/dev/null; then printf 'npx jest --silent\n'
     elif grep -q '"vitest"' "$CWD/package.json" 2>/dev/null; then printf 'npx vitest run --reporter=dot\n'
@@ -71,25 +237,137 @@ detect_runner() {
     printf 'go test ./...\n'
   elif [ -f "$CWD/Cargo.toml" ]; then
     printf 'cargo test --quiet\n'
+  elif [ -d "$CWD/tests" ] && find "$CWD/tests" -maxdepth 2 -name 'test_*.py' -print -quit 2>/dev/null | grep -q .; then
+    # Python unittest discovered by convention; no manifest required.
+    printf 'python3 -m unittest discover -s tests -p "test_*.py" -v\n'
   else
     printf '\n'
   fi
 }
 
 # Compute both the file-list (for scope creep) and the full diff text (for AC matching).
-# Match against full diff text — file NAMES alone miss ACs that refer to code behavior
-# (e.g., "script greps the git diff" should match a file named verify.sh whose body
-# actually runs grep).
+# IMPORTANT: --diff-filter excludes DELETED files from DIFF_NAMES, so a
+# `git rm tests/test_*.py` produces FAIL on every AC referencing that file
+# (the file isn't "present" in the new state) instead of misleading PARTIAL.
 compute_diff() {
   if git -C "$CWD" rev-parse HEAD~1 >/dev/null 2>&1; then
-    DIFF_NAMES="$(git -C "$CWD" diff --name-only HEAD~1..HEAD)"
+    DIFF_NAMES="$(git -C "$CWD" diff --name-only --diff-filter=ACMR HEAD~1..HEAD)"
     DIFF_TEXT="$(git -C "$CWD" diff HEAD~1..HEAD)"
   else
-    # Only one commit; show all files it touched (excluding .git internals).
-    DIFF_NAMES="$(git -C "$CWD" show --name-only --format='' HEAD 2>/dev/null | grep -v '^$' \
+    DIFF_NAMES="$(git -C "$CWD" show --name-only --format='' HEAD 2>/dev/null \
+      | grep -v '^$' \
       || git -C "$CWD" diff --name-only)"
     DIFF_TEXT="$(git -C "$CWD" show HEAD 2>/dev/null \
       || git -C "$CWD" diff)"
+  fi
+}
+
+# For an AC with keywords, return the list of files in the diff whose
+# patch content contains at least one keyword. Output: newline-separated
+# file paths, capped at 3. Empty string if no matches.
+hits_for() {
+  local kws="$1"
+  [ -z "$kws" ] && { printf ''; return 0; }
+  [ -z "$DIFF_TEXT" ] && { printf ''; return 0; }
+
+  local matches=""
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    # Extract hunks for this file: from "diff --git a/<f>" until the
+    # next "diff --git" (or end of input).
+    local file_diff
+    file_diff="$(printf '%s' "$DIFF_TEXT" | awk -v file="$f" '
+      BEGIN { in_target=0 }
+      /^diff --git/ {
+        if (in_target) exit
+        if (index($0, " b/"file) || index($0, " a/"file)) in_target=1
+        next
+      }
+      in_target { print }
+    ')"
+    [ -z "$file_diff" ] && continue
+    if printf '%s' "$file_diff" | grep -qiE "$kws"; then
+      if [ -z "$matches" ]; then
+        matches="$f"
+      else
+        matches="${matches}
+$f"
+      fi
+    fi
+  done <<< "$DIFF_NAMES"
+
+  # Cap to 3 files in the output, newline-separated.
+  if [ -z "$matches" ]; then
+    printf ''
+  else
+    printf '%s\n' "$matches" | head -3
+  fi
+}
+
+# Check that no migrations were edited (unless spec declares migrations).
+check_migrations() {
+  local spec="$1"
+  local mig_files
+  mig_files="$(printf '%s' "$DIFF_NAMES" | grep -E '(^|/)migrations?/' || true)"
+  if grep -qE 'Migration strategy:|^## .* [Mm]igrations' "$spec" 2>/dev/null; then
+    echo "OK:declared"
+    return
+  fi
+  if [ -n "$mig_files" ]; then
+    echo "VIOLATION: ${mig_files}"
+    return
+  fi
+  echo "OK"
+}
+
+# Check that no manifest files were changed (would indicate new deps).
+check_deps() {
+  if printf '%s' "$DIFF_NAMES" | grep -qE '^(package\.json|requirements\.txt|pyproject\.toml|Cargo\.toml|go\.mod)$'; then
+    echo "WARN: dependency manifest changed — review for unapproved deps"
+    return
+  fi
+  echo "OK"
+}
+
+# Check that Non-Goals are NOT implemented. Strict: only the file
+# basename is matched against distinctive keywords (length >= 6, no
+# stopwords). This avoids false positives where a feature file happens
+# to share a short word with a non-goal (e.g. "photo" in src/upload.ts
+# matching a non-goal that mentions "photo").
+check_non_goals() {
+  local spec="$1"
+  local non_goals
+  non_goals="$(extract_section_bullets "$spec" "Non-Goals")"
+  if [ -z "$non_goals" ]; then
+    echo "OK:none"
+    return
+  fi
+  local violations=""
+  while IFS= read -r ng; do
+    [ -z "$ng" ] && continue
+    # Extract distinctive keywords (length >= 6, strict stopwords).
+    local kws
+    kws="$(printf '%s' "$ng" | tr '[:upper:]' '[:lower:]' \
+      | tr -cs 'a-z0-9_' '\n' \
+      | awk 'length($0) >= 6' \
+      | grep -vE '^(this|that|with|will|build|implement|out|scope|feature|deferred|separate|hard|forever|never|right|support|first|phase|should|could|must|generated|animated|adjustments|carousel|multiple|formats|photos|avatars|filters)$' \
+      | paste -sd '|' -)"
+    [ -z "$kws" ] && continue
+    # Check ONLY file basenames (not full paths) — this prevents paths
+    # like "docs/requirements/profile-photo-upload/spec.md" from matching
+    # a non-goal that mentions "photo".
+    local hit
+    hit="$(printf '%s\n' "$DIFF_NAMES" | while IFS= read -r f; do
+            [ -n "$f" ] && basename "$f"
+          done | grep -iE "($kws)" | head -1)"
+    if [ -n "$hit" ]; then
+      violations="${violations}${ng} (${hit}) | "
+    fi
+  done <<< "$non_goals"
+  if [ -n "$violations" ]; then
+    echo "VIOLATION: ${violations%|*}"
+  else
+    echo "OK"
   fi
 }
 
@@ -99,7 +377,7 @@ main() {
   cd "$CWD" || die "cannot cd to $CWD"
   command -v git >/dev/null || die "git not found"
 
-  local spec acs runner diff log_file
+  local spec
   spec="$(find_spec)"
   local feature
   feature="$(basename "$(dirname "$spec")")"
@@ -108,60 +386,132 @@ main() {
   echo "spec=${spec#"$CWD/"}"
   echo
 
-  acs="$(extract_acs "$spec")"
-  if [ -z "$acs" ]; then
-    echo "AC contract: (none found in spec — add ACs before shipping)"
+  DIFF_NAMES="" DIFF_TEXT=""
+  compute_diff
+
+  echo "## Acceptance criteria"
+  # Stream ACs to a temp file so SOH-separated records survive.
+  # Bash variables can't hold null bytes; capturing them strips the
+  # record boundaries and breaks multi-line verification blocks.
+  # We use SOH (\1) because macOS/BWK awk silently drops "\0" in printf.
+  local acs_file
+  acs_file="$(mktemp)"
+  extract_acs "$spec" > "$acs_file"
+  if [ ! -s "$acs_file" ]; then
+    rm -f "$acs_file"
+    echo "  (none found in spec — add ACs before shipping)"
     echo
-    echo "overall: BLOCK (spec has no acceptance criteria)"
+    echo "overall: FAIL (spec has no acceptance criteria)"
     exit 1
   fi
 
-  DIFF_NAMES="" DIFF_TEXT=""
-  compute_diff
-  local diff="$DIFF_TEXT"
-  local diff_count
-  diff_count="$(printf '%s' "$DIFF_NAMES" | grep -c . 2>/dev/null | head -1)"
-  diff_count="${diff_count:-0}"
-  diff_count="$(printf '%d' "$diff_count" 2>/dev/null || echo 0)"
+  local pass=0 partial=0 fail=0 unverified=0
+  local missing_acs=""
+  # Iterate over each AC record (line>>>>verification_block, SOH-separated).
+  while IFS= read -r -d $'\001' record; do
+    [ -z "$record" ] && continue
+    local ac ver ver_block auto_file auto_test
+    ac="${record%>>>>*}"
+    ver_block="${record#*>>>>}"
+    [ "$ver_block" = "$ac" ] && ver_block=""
+    ver="$(extract_verification "$ver_block")"
+    auto_file="$(printf '%s' "$ver" | sed -nE 's/^auto_file=(.*)/\1/p')"
+    auto_test="$(printf '%s' "$ver" | sed -nE 's/^auto_test=(.*)/\1/p')"
 
-  echo "AC contract:"
-  local pass=0 fail=0 missing_acs=""
-  while IFS= read -r ac; do
-    [ -z "$ac" ] && continue
-    local kws hits
-    kws="$(extract_keywords "$ac")"
-    if [ -n "$kws" ] && [ -n "$diff" ]; then
-      hits="$(printf '%s\n' "$diff" | grep -iE "$kws" | head -3 | paste -sd ',' -)"
-    else
+    local kws hits status evidence_str
+    if [ -n "$auto_file" ]; then
+      # Per-AC verification path. Skip generic keyword matching.
+      kws=""
       hits=""
-    fi
-    if [ -n "$hits" ]; then
-      printf '  ✓ %s\n      implemented: %s\n' "$ac" "$hits"
-      pass=$((pass + 1))
+      status="$(classify "" "$ac" "$ver")"
+      if [ -n "$auto_test" ]; then
+        evidence_str="test: ${auto_file}::${auto_test}"
+      else
+        evidence_str="test: ${auto_file}"
+      fi
     else
-      printf '  ✗ %s\n      NOT IMPLEMENTED in current diff\n' "$ac"
-      fail=$((fail + 1))
-      missing_acs="${missing_acs}${missing_acs:+$'\n'}  - ${ac}"
+      kws="$(extract_keywords "$ac")"
+      hits="$(hits_for "$kws")"
+      status="$(classify "$hits" "$ac" "")"
+      evidence_str="${hits:-none}"
     fi
-  done <<< "$acs"
+
+    case "$status" in
+      PASS)       printf '  ✓  %-11s %s\n' "PASS" "$ac"
+                  [ -n "$auto_file" ] && printf '       %s\n' "$evidence_str"
+                  pass=$((pass + 1)) ;;
+      PARTIAL)    printf '  ⚠  %-11s %s\n' "PARTIAL" "$ac"
+                  printf '       evidence: %s\n' "$evidence_str"
+                  partial=$((partial + 1)) ;;
+      FAIL)       printf '  ✗  %-11s %s\n' "FAIL" "$ac"
+                  printf '       evidence: %s\n' "$evidence_str"
+                  fail=$((fail + 1))
+                  missing_acs="${missing_acs}${missing_acs:+$'\n'}  - ${ac}" ;;
+      UNVERIFIED) printf '  ?  %-11s %s\n' "UNVERIFIED" "$ac"
+                  unverified=$((unverified + 1)) ;;
+    esac
+  done < "$acs_file"
+  rm -f "$acs_file"
 
   echo
-  printf 'summary: %d/%d ACs have implementation in the diff\n' "$pass" "$((pass + fail))"
+  local total=$((pass + partial + fail + unverified))
+  printf 'summary: %d/%d ACs PASS  ·  %d PARTIAL  ·  %d UNVERIFIED  ·  %d FAIL\n' \
+    "$pass" "$total" "$partial" "$unverified" "$fail"
 
-  # ---------- run tests ----------
+  # ---------- Non-Goals ----------
   echo
+  echo "## Non-Goals (must NOT be implemented)"
+  local ng_result
+  ng_result="$(check_non_goals "$spec")"
+  if [ "${ng_result#OK}" != "$ng_result" ]; then
+    # OK: print each non-goal as ✓ not implemented
+    local ng_spec
+    ng_spec="$(extract_section_bullets "$spec" "Non-Goals" | head -10)"
+    if [ -z "$ng_spec" ]; then
+      echo "  (none declared in spec)"
+    else
+      while IFS= read -r ng; do
+        [ -z "$ng" ] && continue
+        printf '  ✓  not implemented: %s\n' "$ng"
+      done <<< "$ng_spec"
+    fi
+  else
+    echo "  ! $ng_result"
+  fi
+
+  # ---------- Constraints ----------
+  echo
+  echo "## Constraints"
+  local mig_result dep_result
+  mig_result="$(check_migrations "$spec")"
+  if [[ "$mig_result" == OK* ]]; then
+    echo "  ✓ migrations: not edited (or spec declares strategy)"
+  else
+    echo "  ✗ migrations: $mig_result"
+  fi
+  dep_result="$(check_deps)"
+  if [[ "$dep_result" == OK* ]]; then
+    echo "  ✓ dependencies: no manifest change"
+  else
+    echo "  ⚠ dependencies: $dep_result"
+  fi
+
+  # ---------- Tests ----------
+  echo
+  local runner
   runner="$(detect_runner)"
   if [ -n "$runner" ]; then
     printf 'test runner: %s\n' "$runner"
+    local log_file
     log_file="$(mktemp)"
     if (eval "$runner") >"$log_file" 2>&1; then
       echo "  ✓ tests pass"
     else
       echo "  ✗ tests FAIL"
       tail -15 "$log_file" | sed 's/^/      /'
-      echo
-      echo "overall: BLOCK (tests failing)"
       rm -f "$log_file"
+      echo
+      echo "overall: FAIL (tests failing)"
       exit 1
     fi
     rm -f "$log_file"
@@ -170,25 +520,48 @@ main() {
     echo "  → tests not run; verify manually before ship"
   fi
 
-  # ---------- scope creep ----------
+  # ---------- Scope-creep ----------
+  local diff_count
+  diff_count="$(printf '%s' "$DIFF_NAMES" | grep -c . 2>/dev/null | head -1)"
+  diff_count="${diff_count:-0}"
+  diff_count="$(printf '%d' "$diff_count" 2>/dev/null || echo 0)"
+
   echo
-  echo "scope creep check (files changed):"
+  echo "## Scope creep (files changed)"
   if [ "$diff_count" -eq 0 ]; then
     echo "  (no diff)"
   else
     printf '%s\n' "$DIFF_NAMES" | sed 's/^/  /'
   fi
 
-  # ---------- overall ----------
+  # ---------- Overall ----------
   echo
+  local override="${VIBE_SHIP_OVERRIDE:-}"
+
   if [ "$fail" -gt 0 ]; then
-    echo "overall: BLOCK"
+    echo "overall: FAIL"
     echo "  missing ACs:"
     printf '%s\n' "$missing_acs"
     echo "  fix: implement the AC, or update the spec if scope changed."
+    echo "  exit: 1 (blocks ship; VIBE_SHIP_OVERRIDE cannot lift FAIL)"
     exit 1
   fi
+
+  if [ "$partial" -gt 0 ] || [ "$unverified" -gt 0 ]; then
+    echo "overall: BLOCK"
+    [ "$partial" -gt 0 ]    && echo "  review: PARTIAL items need a test or stronger evidence"
+    [ "$unverified" -gt 0 ] && echo "  human-judged ACs need explicit review (see ? marks)"
+    if [ -n "$override" ]; then
+      echo "  VIBE_SHIP_OVERRIDE=$override → override accepted (exit 0)"
+      echo "  human sign-off: BLOCK lifted by explicit override; ship with eyes open"
+      exit 0
+    fi
+    echo "  exit: 2 (blocks ship; set VIBE_SHIP_OVERRIDE=1 with documented reason to proceed)"
+    exit 2
+  fi
+
   echo "overall: PASS"
+  echo "  exit: 0 (ship-ready)"
   exit 0
 }
 

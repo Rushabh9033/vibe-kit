@@ -6,9 +6,9 @@ Ship a feature. Run the pre-flight gate, then update the user-visible artifacts,
 
 ## Pre-flight checklist (every box must tick before ship)
 
-Run `/vibe-verify` first; if it returns `overall: BLOCK`, refuse to ship.
+Run `/vibe-verify` first; if it returns `overall: FAIL`, refuse to ship.
 
-- [ ] `/vibe-verify` returned `overall: PASS`
+- [ ] `/vibe-verify` returned `overall: PASS` (or `PARTIAL` with a documented human-review sign-off for any `? UNVERIFIED` ACs and any `! REVIEW` violations)
 - [ ] Edge cases enumerated and tested (per spec)
 - [ ] NFRs checked (perf, a11y, security, observability)
 - [ ] lint + typecheck green
