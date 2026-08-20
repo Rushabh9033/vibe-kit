@@ -8,12 +8,13 @@
 ## The pain
 
 ```
-You:  "Let users delete their account."
-AI:   adds a Delete button, does `DELETE FROM users WHERE id=?`.
-      No grace period. No audit log. No "are you sure" with export.
-You:  ship it. Three months later a user asks for their data,
-      then asks you to prove you deleted it. You have no record.
-      Eat the GDPR exposure; spend a week writing a migration.
+You:  "Send a webhook when an order ships."
+AI:   calls `requests.post(url, json=payload)` on the ship event.
+      No retries, no signing, no idempotency key, no DLQ.
+You:  ship it. A customer reports they missed 12% of shipping events.
+      Another got duplicates because the worker retried.
+      A third got replayed by a bad actor — you weren't signing.
+      Rebuild it properly. Then backfill the missed ones.
 ```
 
 The failure isn't the AI. The failure is that **intent was never made specific**.
