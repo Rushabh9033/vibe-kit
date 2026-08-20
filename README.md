@@ -1,6 +1,6 @@
 # Vibe Coding Kit (`vibe-kit`)
 
-**by Rushabh Mavani** — `vibe-kit by rushabh mavani`
+**by Rushabh Mavani**
 
 > Two roles. One spec. Any AI on the planning side, any dev tool on the building side.
 
@@ -43,14 +43,11 @@ A reusable kit for AI-assisted development that:
 ### Option A — Claude Code Skill (preferred)
 
 ```bash
-# Inside any Claude Code session
-> /plugin install vibe-kit
-
-# Or copy the skill folder into ~/.claude/skills/
+# Copy the skill folder into ~/.claude/skills/
 cp -R skills/vibe-kit ~/.claude/skills/
 
-# Then in any session:
-> /skill vibe-kit
+# Then in any Claude Code session:
+/skill vibe-kit
 ```
 
 The Skill auto-loads the playbook, the per-feature spec prompts, the verification gates, and the compound-correction rules.
@@ -58,7 +55,7 @@ The Skill auto-loads the playbook, the per-feature spec prompts, the verificatio
 ### Option B — Raw kit (any dev tool)
 
 ```bash
-git clone https://github.com/<you>/vibe-kit
+git clone https://github.com/Rushabh9033/vibe-kit
 cd vibe-kit/kit
 # See install/<your-tool>.md for tool-specific steps.
 ```
@@ -78,7 +75,7 @@ vibe-kit/
 ├── docs/                                # the long-form playbook
 │   ├── architecture.md                  # two-role model explained
 │   ├── requirements-gathering.md        # the most important workflow
-│   ├── gap-analysis.md                  # honest: kit vs top 0.001%
+│   ├── gap-analysis.md                  # comparison: kit vs current practice
 │   └── playbook.md                      # the unified guide (condensed)
 ├── prompts/                             # planner-side prompts (any AI)
 │   ├── README.md                        # two-role in 1 minute
@@ -141,19 +138,12 @@ git init
 # 3. Per feature, run prompts/02-feature-spec.md → docs/requirements/<slug>/spec.md
 
 # 4. Open Claude Code (or Cursor/Antigravity/Aider) in your project
-> /vibe-plan profile-photo-upload           # writes plan.md
-> /vibe-verify                              # runs the 7-rank verification matrix
-> /vibe-ship                                # pre-flight + CHANGELOG + handoff
+/vibe-plan profile-photo-upload             # writes plan.md
+/vibe-verify                                # runs the 7-rank verification matrix
+/vibe-ship                                  # pre-flight + CHANGELOG + handoff
 ```
 
 ---
-
-## What this is not
-
-- **Not** a code generator. The Coder role is *spec-consumed*, not spec-generated.
-- **Not** a single-tool play. The Planner can be ChatGPT; the Coder can be Claude Code.
-- **Not** top-0.001%. See [`docs/gap-analysis.md`](docs/gap-analysis.md) for the honest comparison.
-- **Not** finished. It's a kit; you adapt it.
 
 ## License
 
