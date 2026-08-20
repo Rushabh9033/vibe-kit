@@ -38,15 +38,18 @@ CWD="$(pwd)"
 
 # ---------- helpers ----------
 
-die() { echo "vibe-verify: $*" >&2; exit 2; }
+die() { echo "vibe-verify: $*" >&2; exit 3; }
 
 # Find the most recent spec.md under docs/requirements/.
+# Returns non-zero on miss; the caller (main) is responsible for converting
+# that into a CONFIG exit-3. We deliberately do NOT call die() here —
+# `exit` inside a function called from $(...) only terminates the
+# command-substitution subshell, leaving the parent to fall through and
+# silently report FAIL instead of CONFIG.
 find_spec() {
   local found
   found="$(find "$CWD/docs/requirements" -name 'spec.md' -type f 2>/dev/null | sort | tail -1)"
-  if [ -z "$found" ]; then
-    die "no spec found at docs/requirements/*/spec.md (run /vibe-spec first)"
-  fi
+  [ -n "$found" ] || return 1
   printf '%s\n' "$found"
 }
 
@@ -378,7 +381,11 @@ main() {
   command -v git >/dev/null || die "git not found"
 
   local spec
-  spec="$(find_spec)"
+  if ! spec="$(find_spec)"; then
+    echo "vibe-verify: no spec found at docs/requirements/*/spec.md (run /vibe-spec first)" >&2
+    echo "vibe-verify: CONFIG error — exit 3 (cannot be lifted by VIBE_SHIP_OVERRIDE)" >&2
+    exit 3
+  fi
   local feature
   feature="$(basename "$(dirname "$spec")")"
 
@@ -536,7 +543,14 @@ main() {
 
   # ---------- Overall ----------
   echo
+  # Strict-equality check: ONLY literal "1" enables the override.
+  # "false", "no", "0", "true", "yes" all evaluate to override DISABLED.
   local override="${VIBE_SHIP_OVERRIDE:-}"
+  if [ "$override" = "1" ]; then
+    :  # override enabled
+  else
+    override=""
+  fi
 
   if [ "$fail" -gt 0 ]; then
     echo "overall: FAIL"
@@ -552,7 +566,7 @@ main() {
     [ "$partial" -gt 0 ]    && echo "  review: PARTIAL items need a test or stronger evidence"
     [ "$unverified" -gt 0 ] && echo "  human-judged ACs need explicit review (see ? marks)"
     if [ -n "$override" ]; then
-      echo "  VIBE_SHIP_OVERRIDE=$override → override accepted (exit 0)"
+      echo "  VIBE_SHIP_OVERRIDE=1 → override accepted (exit 0)"
       echo "  human sign-off: BLOCK lifted by explicit override; ship with eyes open"
       exit 0
     fi

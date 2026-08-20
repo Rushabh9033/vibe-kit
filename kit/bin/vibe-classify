@@ -33,7 +33,18 @@ command -v git >/dev/null || die "git not found"
 SENSITIVE_PATTERNS='(^|/)(auth|authorization|authentication|login|session|oauth|jwt|password|secret|credentials|api[_-]?key|token|rsa|pem|private)[._-]|/billing/|/payment|/stripe|/checkout|/security/|/secrets/|/cryptography/|/crypto/|/audit[_-]?log|/compliance/'
 
 # Patterns that suggest large / architectural changes.
-LARGE_PATTERNS='(^|/)(migrations?/|schema|migration)/|/db/|/database/|/models?/|/repositories/|/architecture|/infrastructure|/terraform|/k8s|/kubernetes|/docker-compose|/proto/'
+# Matches by either directory-style segment OR specific high-impact file name.
+# Conservative: only files that are canonically "this changes everything
+# downstream" — dep manifests, build definitions, schema, API contracts,
+# infra, CI. Random config.json / data.yaml are NOT matched.
+# Suffix-only patterns (file extension at end of path) — must NOT be wrapped
+# in (^|/)(...) because that anchors the alternation to a path-segment
+# boundary BEFORE the suffix. /[^/]*\.sql$ already restricts to the last
+# path segment; .sql$ alone matches any *.sql at any depth.
+LARGE_SUFFIX_PATTERNS='\.(sql|proto|prisma|graphql)$|/openapi\.(yaml|yml)$|/swagger\.(yaml|yml)$'
+
+# Prefix patterns — anchored at path-segment boundaries.
+LARGE_PATTERNS='(^|/)(migrations?/|schema|migration)/|/db/|/database/|/models?/|/repositories/|/architecture|/infrastructure|/terraform|/k8s|/kubernetes|/docker-compose|/proto/|(^|/)(api)(/|$|[._-])|(^|/)(package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|requirements[^/]*\.txt|pyproject\.toml|go\.(mod|sum)|Cargo\.(toml|lock)|Gemfile(\.lock)?|composer\.(json|lock)|Chart\.yaml|helmfile\.yaml|Dockerfile(/|$|[._-])|docker[_-]compose|schema\.(prisma|graphql)|(^|/)\.github/workflows/)'
 
 # Compute diff stats. Args: <base> <head> (defaults: HEAD~1..HEAD, or working tree)
 compute_stats() {
@@ -79,7 +90,7 @@ classify() {
 
   local has_sensitive has_large
   has_sensitive="$(printf '%s' "$names" | grep -iE "$SENSITIVE_PATTERNS" | head -1)"
-  has_large="$(printf '%s' "$names" | grep -iE "$LARGE_PATTERNS" | head -1)"
+  has_large="$(printf '%s' "$names" | grep -iE "$LARGE_PATTERNS|$LARGE_SUFFIX_PATTERNS" | head -1)"
 
   if [ -n "$has_sensitive" ]; then
     echo "critical|$has_sensitive matches sensitive-path pattern|$n_files|$n_lines"
