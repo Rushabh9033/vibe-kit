@@ -5,6 +5,20 @@
 This file applies in every project unless overridden by a project-level `AGENTS.md` / `CLAUDE.md`.
 Project-level rules win on conflict. Per-file rules in `.claude/rules/<topic>.md` are auto-scoped by the `paths:` frontmatter.
 
+## Spec-first gate (run at every task start)
+
+The kit enforces Spec-first. The Planner is optional — you can also be the Coder.
+Before any non-trivial edit, run this gate:
+
+1. Is the work trivial? (`vibe-classify` → `tiny`) → proceed.
+2. Does an applicable Spec exist?
+   - `Status: in-progress` → resume.
+   - `Status: awaiting-approval` → STOP. The user must flip it to `in-progress`.
+   - `Status: draft` or no Spec on non-trivial work → enter Discovery (single source of truth: `prompts/00-anchor.md` § Discovery protocol), write `docs/requirements/<feature>/spec.md` from `kit/templates/requirements-spec.md`, set `Status: awaiting-approval`, **stop**.
+3. **Approval boundary:** the user is the only one who can flip `Status: awaiting-approval → in-progress`.
+
+Full decision tree: `kit/templates/spec-first-gate.md`.
+
 ## Pre-flight (any non-trivial edit)
 
 1. Find the spec for current work: `docs/SPEC.md` (milestone) or `docs/requirements/<feature>/spec.md` (feature). If neither exists and the work is more than a typo, **propose one before coding**.

@@ -65,6 +65,7 @@ def render(name: str, stack: str) -> str:
         return (
             "@AGENTS.md\n\n"
             "# Claude Code specifics\n"
+            "- **Spec-first gate (run at every task start):** find `docs/requirements/<feature>/spec.md`; if none exists for non-trivial work, run Discovery (`prompts/00-anchor.md` § Discovery protocol), write the Spec, set `Status: awaiting-approval`, and STOP until the user flips it to `in-progress`. (Full decision tree: `kit/templates/spec-first-gate.md`.)\n"
             "- Plan mode (Shift+Tab) for any non-trivial change in /auth, /billing, /security.\n"
             "- `/vibe-verify` before claiming done on any user-visible feature.\n"
             "- `/vibe-handoff` at end of any session that touched code.\n"

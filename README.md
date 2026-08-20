@@ -8,10 +8,12 @@
 ## The pain
 
 ```
-You:  "Add a profile photo upload."
-AI:   builds 4 image variants, mobile-first, EXIF-stripped, idempotent,
-      rate-limited, with a crop modal UI, in the wrong place.
-You:  spend 2 hours unwinding.
+You:  "Let users delete their account."
+AI:   adds a Delete button, does `DELETE FROM users WHERE id=?`.
+      No grace period. No audit log. No "are you sure" with export.
+You:  ship it. Three months later a user asks for their data,
+      then asks you to prove you deleted it. You have no record.
+      Eat the GDPR exposure; spend a week writing a migration.
 ```
 
 The failure isn't the AI. The failure is that **intent was never made specific**.

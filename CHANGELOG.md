@@ -5,6 +5,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Fixed — runtime propagation of the Spec-first gate
+- **`kit/CLAUDE.md`** — added a "Spec-first gate (run at every task start)" section before Pre-flight. This file is copied verbatim to every project's `AGENTS.md` by `vibe-install:223` and to the global `~/.claude/CLAUDE.md` by `vibe-install:156`. The new section points at `kit/templates/spec-first-gate.md` as the canonical decision tree and summarizes the 3-step gate (trivial→proceed; awaiting-approval→halt; otherwise→Discovery then write Spec with `Status: awaiting-approval`). **Approval boundary preserved.**
+- **`kit/bin/vibe-init` `render("CLAUDE.md")`** — added a one-line Spec-first gate pointer to the inline string that generates project `CLAUDE.md`. References `prompts/00-anchor.md § Discovery protocol` and `kit/templates/spec-first-gate.md`. Does NOT duplicate the full decision tree; the inline string stays terse.
+- **`tests/spec-first/test-spec-first-gate.sh`** — new section 7: runs `vibe-install --tool=claude-code --root=$TMP` into a fresh temp dir with a `HOME` override (so the in-repo `kit/bin/vibe-init` is exercised, not a stale global copy). Asserts the resulting `CLAUDE.md` and `AGENTS.md` both contain the gate AND reference the canonical `kit/templates/spec-first-gate.md`. This catches future propagation regressions.
+
+### Changed
+- **`README.md`** "The pain" example swapped from a "profile photo upload" over-engineering story to an "account deletion" intent-mismatch story. The new example shows the AI doing the literal-correct thing (`DELETE FROM users WHERE id=?`) and missing every spec-worthy question (grace period, audit log, GDPR erasure-vs-anonymization). Unwinding cost is concrete (GDPR exposure + a migration). The previous example's parade of buzzwords ("4 image variants, mobile-first, EXIF-stripped, idempotent, rate-limited") conflated over-engineering with intent-mismatch and didn't model the actual failure mode vibe-kit solves.
+
+## [Unreleased] (previous)
+
 ### Added — Spec-first gate, Planner optional
 - **`kit/templates/spec-first-gate.md`** — canonical decision tree the Coder runs at every task start. Trivial work proceeds; in-progress Specs are resumed; awaiting-approval Specs halt (user must flip `Status: in-progress`); no applicable Spec on non-trivial work → Coder enters DISCOVERY MODE (single source of truth: `prompts/00-anchor.md` § Discovery protocol), writes `docs/requirements/<feature>/spec.md` from `kit/templates/requirements-spec.md`, and **stops for approval** before any code is touched.
 - **Planner is now optional.** The Coder can run Discovery itself when no Spec exists. Both entry points (Planner or Coder) produce the same Spec structure and the same `Status` discipline. The ship gate (`vibe-verify` + `/vibe-ship`) is unchanged and doesn't care which path produced the Spec.
