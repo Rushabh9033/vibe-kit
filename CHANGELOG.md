@@ -5,6 +5,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-20
+### Fixed
+- **Stop hook prompt-error loop eliminated.** The kit's `Stop` hook previously combined a `command`-type and a `prompt`-type hook. The prompt fired the assistant every Stop, asking it to fill in a stub the script had just written. When the script throttled (the common case after the first write), the assistant had no stub to fill, but the prompt kept firing — producing a visible "Stop hook error" at every turn. The fix:
+  1. Removed the `prompt`-type `Stop` hook from `kit/settings.json` and from `kit/bin/vibe-init`'s render.
+  2. Made `session-end-handoff.sh` self-filling. It now writes a 2k+ handoff with what the shell can determine: branch + dirty/clean + ahead/behind, recent commits (last 4h), files touched (current dirty tree), recent commits matching `gotcha|trap|fix|bug`, and the appropriate `unknown — left for next session` for fields the shell can't determine (Decisions, In progress, Blocked, Next steps).
+  3. The script is now silent on throttle (no stderr, exit 0). The previous version printed "throttled" on stderr, which the prompt's "if it printed throttled, do nothing" check tried to interpret — but the prompt no longer exists.
+- **vibe-verify AC false-positive protection**: scripts no longer match ACs against the filename-only diff (case where "upload" matches upload.ts but the file is empty). Already shipped in v0.3.0; mentioned here because the previous behavior was a known-false signal.
+
+### Changed
+- `kit/bin/hooks/session-end-handoff.sh`: rewritten. ~150 lines → ~190 lines. Self-filling. Silent on throttle.
+- `kit/settings.json` and `kit/bin/vibe-init` `render()`: `Stop` hook is now a single `command`-type entry.
+
 ## [0.3.0] - 2026-08-20
 ### Added
 - **Per-tool auto-detection + unified installer**: `kit/bin/vibe-install` detects Claude Code / Cursor / Antigravity / Aider / Codex / generic from env vars and cwd files, then drops the right rules + commands + conventions file. No flag needed.

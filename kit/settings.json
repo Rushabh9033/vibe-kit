@@ -57,10 +57,6 @@
           {
             "type": "command",
             "command": "~/.claude/vibe-kit/bin/hooks/session-end-handoff.sh"
-          },
-          {
-            "type": "prompt",
-            "prompt": "A session handoff stub was just written by `session-end-handoff.sh` (path is in its stderr). If the script printed 'throttled' on stderr, do nothing — the previous handoff still represents current state and re-filling it would burn tokens for no gain. Otherwise, open that stub, then read the template at ~/.claude/vibe-kit/templates/handoff.md and fill in: Goal, Done, In progress, Blocked, Files touched, Decisions made, Next steps, and Gotchas learned. If a section can't be determined, write 'unknown — left for next session'. Keep the fill tight — bullet points and one-liners only; full prose belongs in the spec/ADR, not the handoff. Do not modify the metadata footer. Skip CHANGELOG.md appends unless the change was actually deployed (not just discussed)."
           }
         ]
       }

@@ -144,8 +144,8 @@ def render(name: str, stack: str) -> str:
       {
         "hooks": [
           {
-            "type":"prompt",
-            "prompt":"If this session did nontrivial work, write a handoff to docs/handoffs/$(date +%Y-%m-%d)-$(git rev-parse --abbrev-ref HEAD | tr '/' '-').md using the template at ~/.claude/vibe-kit/templates/handoff.md. Update HANDOFF.md TL;DR. Append CHANGELOG.md [Unreleased] if user-visible change. Skip if docs/handoffs/ does not exist in the working directory."
+            "type":"command",
+            "command":"~/.claude/vibe-kit/bin/hooks/session-end-handoff.sh"
           }
         ]
       }

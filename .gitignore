@@ -38,3 +38,7 @@ target/
 # Coverage / cache
 coverage/
 .cache/
+
+# Vibe kit — throttle marker (per-session, not source)
+docs/handoffs/.last-handoff-epoch
+.vibe-cache/

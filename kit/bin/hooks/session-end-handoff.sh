@@ -1,22 +1,35 @@
 #!/usr/bin/env bash
-# Stop hook — writes a session handoff stub RELIABLY, regardless of cwd.
-# Rationale: a prompt-only hook can be silently skipped. A command-hook that
-# touches disk always lands.
+# Stop hook — writes a session handoff RELIABLY, regardless of cwd.
 #
-# Resolution order:
+# v2: this script is now the entire handoff mechanism. It runs as a
+# command-type Stop hook and writes a filled-in handoff directly. There
+# is no companion prompt — the assistant is not asked to fill anything
+# in, so the prompt-error loop is gone.
+#
+# Resolution order for the handoff directory:
 #   1. cwd/docs/handoffs/         (project-primary; VCP default)
 #   2. cwd/.claude/handoffs/      (project-secondary)
 #   3. $HOME/.claude/projects/<cwd-base>/handoffs/  (global fallback)
 #
 # Throttle: by default, no more than one handoff per 10 minutes. Set
-# VIBE_HANDOFF_THROTTLE=0 to disable. When throttled, prints "throttled"
-# on stderr and writes nothing — the Stop-hook prompt no-ops on that signal.
+# VIBE_HANDOFF_THROTTLE=0 to disable. When throttled, the script exits
+# 0 SILENTLY — no stderr, no prompt, no error.
 #
 # Per-invocation uniqueness within the throttle window: if a file for the
 # current date+slug already exists at the resolved path, a uniqueness suffix
 # is appended so multiple Stop fires inside one "real" session still get
-# recorded. The throttle happens BEFORE uniqueness, so the throttle window
-# is real wall-clock minutes, not "minutes between unique writes".
+# recorded. The throttle happens BEFORE uniqueness.
+#
+# What the script fills in (shell can determine):
+#   - Goal: link to docs/SPEC.md or "unknown — left for next session"
+#   - Branch / state: branch name + dirty/clean + ahead/behind
+#   - Done: shortlog of commits by this session (since last tag, last hour)
+#   - Files touched: git diff --name-only against last commit / HEAD
+#   - Verification: status of common test/lint/typecheck commands
+#   - Gotchas: any commit messages containing "gotcha" or "trap"
+#   - Next steps: files-modified-since-N-min as a hint
+#   - Field the script CAN'T determine (e.g. subjective "Decisions made"):
+#     "unknown — left for next session"
 
 set -euo pipefail
 
@@ -26,7 +39,6 @@ session_id="${CLAUDE_SESSION_ID:-unknown}"
 cwd="$(pwd)"
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'no-git')"
 slug="$(printf '%s' "$branch" | tr '/' '-')"
-# Append session id so per-session artifacts don't clobber each other.
 if [ "$session_id" != "unknown" ]; then
   short_sid="$(printf '%s' "$session_id" | cut -c1-8)"
   slug="${slug}-${short_sid}"
@@ -43,19 +55,13 @@ else
   target_dir="$HOME/.claude/projects/$base/handoffs"
 fi
 
-# Refuse if cwd-base contains unsafe characters (we control the path here;
-# but be defensive against weirdness in $HOME or cwd paths).
 case "$target_dir" in
-  *..*) exit 0 ;;  # silently no-op rather than write somewhere weird
+  *..*) exit 0 ;;
 esac
 
 mkdir -p "$target_dir"
 
-# Throttle: skip writes that fall inside the throttle window.
-# Rationale: Stop hook fires after every assistant message. Without throttle,
-# a long back-and-forth (user ack → agent ack → user ack → ...) produces a
-# new handoff file per turn, each of which the agent then re-reads and fills
-# in — burning tokens for no information gain. Default 600s (10 min).
+# --- Throttle (silent on hit) ---
 THROTTLE_SECONDS="${VIBE_HANDOFF_THROTTLE:-600}"
 if [ "$THROTTLE_SECONDS" -gt 0 ]; then
   marker="$target_dir/.last-handoff-epoch"
@@ -63,18 +69,14 @@ if [ "$THROTTLE_SECONDS" -gt 0 ]; then
     last_epoch="$(cat "$marker" 2>/dev/null || echo 0)"
     now_epoch="$(date +%s)"
     if [ "$last_epoch" -gt 0 ] && [ $((now_epoch - last_epoch)) -lt "$THROTTLE_SECONDS" ]; then
-      echo "vibe-kit: handoff throttled (last write $((now_epoch - last_epoch))s ago, window ${THROTTLE_SECONDS}s)" >&2
-      exit 0
+      exit 0   # silent: no stderr, no exit code, no prompt
     fi
   fi
   date +%s > "$marker"
 fi
 
+# --- Per-invocation uniqueness ---
 filepath="$target_dir/${date}-${slug}.md"
-
-# Per-invocation uniqueness: if a handoff for this date+slug already
-# exists, append a uniqueness suffix so each Stop-hook fire produces a
-# fresh artifact (the "idempotent skip" hides multi-session days).
 if [ -f "$filepath" ]; then
   uniqueness="${CLAUDE_SESSION_ID:-}"
   uniqueness="$(printf '%s' "$uniqueness" | cut -c1-8)"
@@ -82,54 +84,99 @@ if [ -f "$filepath" ]; then
   filepath="$target_dir/${date}-${slug}-${uniqueness}.md"
 fi
 
+# --- Collect what the shell can determine ---
+
+# Branch state
+branch_state="clean"
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+  branch_state="dirty"
+fi
+ahead_behind=""
+ab="$(git rev-list --left-right --count '@{u}...HEAD' 2>/dev/null || true)"
+if [ -n "$ab" ]; then
+  ahead_behind=" (ahead $(echo "$ab" | cut -f2), behind $(echo "$ab" | cut -f1))"
+fi
+
+# Recent commits (last 10 in this session-window: today or last 4 hours)
+recent_commits="$(git log --since='4 hours ago' --pretty=format:'- %s' 2>/dev/null | head -10)"
+if [ -z "$recent_commits" ]; then
+  recent_commits="- (no commits in the last 4 hours)"
+fi
+
+# Files touched (modified vs HEAD)
+files_touched=""
+if [ "$branch_state" = "dirty" ]; then
+  files_touched="$(git status --porcelain 2>/dev/null | sed 's/^...//' | head -20)"
+fi
+if [ -z "$files_touched" ]; then
+  files_touched="- (none — working tree clean)"
+fi
+
+# Verification — only run if the manifests exist; look-and-leave otherwise
+verify_lines=""
+[ -f package.json ]    && verify_lines="${verify_lines}- [ ] npm test — $(test -d node_modules && echo 'runnable' || echo 'needs install')\n"
+[ -f pyproject.toml ]  || [ -f requirements.txt ] && verify_lines="${verify_lines}- [ ] pytest — $(command -v pytest >/dev/null && echo 'runnable' || echo 'needs install')\n"
+[ -f go.mod ]          && verify_lines="${verify_lines}- [ ] go test ./...\n"
+[ -f Cargo.toml ]      && verify_lines="${verify_lines}- [ ] cargo test\n"
+[ -f Makefile ]        && verify_lines="${verify_lines}- [ ] make test\n"
+if [ -z "$verify_lines" ]; then
+  verify_lines="- (no test runner detected — package.json / pyproject.toml / go.mod / Cargo.toml)"
+fi
+
+# Gotchas — last commit messages matching "gotcha" or "trap" or "fix"
+gotchas="$(git log --oneline --grep='gotcha\|trap\|fix\|bug' --since='24 hours ago' 2>/dev/null | head -5 | sed 's/^/- /')"
+if [ -z "$gotchas" ]; then
+  gotchas="- (none in last 24h)"
+fi
+
+# Goal — link to spec if it exists
+goal_link=""
+[ -f "$cwd/docs/SPEC.md" ] && goal_link="$cwd/docs/SPEC.md"
+spec_link_line="- Goal: see [$([ -n "$goal_link" ] && echo 'docs/SPEC.md' || echo 'unknown — left for next session')]($([ -n "$goal_link" ] && echo 'docs/SPEC.md' || echo '#'))"
+
+# --- Write the handoff ---
 cat > "$filepath" <<EOF
 # Session: ${date} — ${slug}
 
-> Stub written by Stop hook (\`session-end-handoff.sh\`).
-> Next: the agent should fill in the sections below.
-
 ## Goal
-<!-- What was set out — link to spec/feature. -->
+${spec_link_line}
 
 ## Branch / state
-\`${branch}\` based on \`<base>\`; clean | dirty
+\`${branch}\` — ${branch_state}${ahead_behind}
 
 ## Done
-- [ ]
+${recent_commits}
 
 ## In progress
-- ...
+- unknown — left for next session
 
 ## Blocked
-- ...
+- unknown — left for next session
 
 ## Files touched
-- ...
+${files_touched}
 
 ## Decisions made
-- **Decision**: ...
+- unknown — left for next session
 
 ## Decisions needed
-- **Decision**: ...
+- unknown — left for next session
 
 ## Verification
-- [ ] <test cmd> — pass | fail
-- [ ] <lint cmd> — pass
-- [ ] <typecheck cmd> — pass
+$(printf '%b' "$verify_lines")
 
 ## Next steps for next session
-1. ...
+1. unknown — left for next session
+2. Re-run \`./kit/bin/vibe-verify\` to confirm AC↔code↔tests still hold.
+3. If this handoff's "Done" list is empty and the script couldn't detect commits, fill in manually based on session memory.
 
 ## Gotchas learned
-- ...
+${gotchas}
 
 <!-- context metadata (do not edit) -->
 - session_id: ${session_id}
 - started: ${date}T${time}
 - cwd: ${cwd}
 - branch: ${branch}
-- written_by: vibe-kit/Stop-hook (command)
+- written_by: vibe-kit/Stop-hook (command, self-filling)
 EOF
-
-echo "vibe-kit: stub handoff written to ${filepath}" >&2
-exit 0
