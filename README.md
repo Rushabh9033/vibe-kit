@@ -38,6 +38,26 @@ A reusable kit for AI-assisted development that:
 3. **Compounds** — every mistake becomes a rule, every rule lives in a file, every file shortens the next session.
 4. **Works with any AI** on the planner side (Claude.ai, ChatGPT, Gemini, etc.) and any dev tool on the coder side (Claude Code, Cursor, Antigravity, Aider, Codex, Windsurf).
 
+## The Planner is an interviewer, not a stenographer
+
+Vibe coders give a one-line idea and stop there. The Planner's job is to **ask the rest of the questions for them** — one at a time, in plain language, until the picture is complete. Then it writes the spec, the plan, and the prompts the Coder will consume.
+
+```
+"I want a thing where shop owners paste a product and get 3 ad variations"
+   │
+   ▼
+Planner asks: for which platforms? who writes the captions — the user
+or AI? how do we measure success? what's out of scope? deadline?
+   │
+   ▼ (after 6 rounds of drilling)
+spec.md + plan.md + 4 prompt files → user pastes into Coder tool
+   │
+   ▼
+Coder (Claude Code / Cursor / etc.) executes prompts → working app
+```
+
+The asymmetry is deliberate: vibe coder contributes ~0.001% (the seed), Planner contributes ~99.99% (the questions, the spec, the prompts).
+
 ## Install in 60 seconds
 
 ### Option A — Claude Code Skill (preferred)

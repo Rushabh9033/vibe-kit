@@ -8,8 +8,15 @@
 #   2. cwd/.claude/handoffs/      (project-secondary)
 #   3. $HOME/.claude/projects/<cwd-base>/handoffs/  (global fallback)
 #
-# Writes only if the file doesn't exist (idempotent — don't clobber).
-# The agent (via the Stop hook prompt) is then asked to enrich the stub.
+# Throttle: by default, no more than one handoff per 10 minutes. Set
+# VIBE_HANDOFF_THROTTLE=0 to disable. When throttled, prints "throttled"
+# on stderr and writes nothing — the Stop-hook prompt no-ops on that signal.
+#
+# Per-invocation uniqueness within the throttle window: if a file for the
+# current date+slug already exists at the resolved path, a uniqueness suffix
+# is appended so multiple Stop fires inside one "real" session still get
+# recorded. The throttle happens BEFORE uniqueness, so the throttle window
+# is real wall-clock minutes, not "minutes between unique writes".
 
 set -euo pipefail
 
@@ -36,7 +43,33 @@ else
   target_dir="$HOME/.claude/projects/$base/handoffs"
 fi
 
+# Refuse if cwd-base contains unsafe characters (we control the path here;
+# but be defensive against weirdness in $HOME or cwd paths).
+case "$target_dir" in
+  *..*) exit 0 ;;  # silently no-op rather than write somewhere weird
+esac
+
 mkdir -p "$target_dir"
+
+# Throttle: skip writes that fall inside the throttle window.
+# Rationale: Stop hook fires after every assistant message. Without throttle,
+# a long back-and-forth (user ack → agent ack → user ack → ...) produces a
+# new handoff file per turn, each of which the agent then re-reads and fills
+# in — burning tokens for no information gain. Default 600s (10 min).
+THROTTLE_SECONDS="${VIBE_HANDOFF_THROTTLE:-600}"
+if [ "$THROTTLE_SECONDS" -gt 0 ]; then
+  marker="$target_dir/.last-handoff-epoch"
+  if [ -f "$marker" ]; then
+    last_epoch="$(cat "$marker" 2>/dev/null || echo 0)"
+    now_epoch="$(date +%s)"
+    if [ "$last_epoch" -gt 0 ] && [ $((now_epoch - last_epoch)) -lt "$THROTTLE_SECONDS" ]; then
+      echo "vibe-kit: handoff throttled (last write $((now_epoch - last_epoch))s ago, window ${THROTTLE_SECONDS}s)" >&2
+      exit 0
+    fi
+  fi
+  date +%s > "$marker"
+fi
+
 filepath="$target_dir/${date}-${slug}.md"
 
 # Per-invocation uniqueness: if a handoff for this date+slug already
@@ -48,12 +81,6 @@ if [ -f "$filepath" ]; then
   [ -z "$uniqueness" ] && uniqueness="epoch-$(date +%s)-$$"
   filepath="$target_dir/${date}-${slug}-${uniqueness}.md"
 fi
-
-# Refuse if cwd-base contains unsafe characters (we control the path here;
-# but be defensive against weirdness in $HOME or cwd paths).
-case "$target_dir" in
-  *..*) exit 0 ;;  # silently no-op rather than write somewhere weird
-esac
 
 cat > "$filepath" <<EOF
 # Session: ${date} — ${slug}
