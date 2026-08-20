@@ -5,6 +5,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Added — Spec-first gate, Planner optional
+- **`kit/templates/spec-first-gate.md`** — canonical decision tree the Coder runs at every task start. Trivial work proceeds; in-progress Specs are resumed; awaiting-approval Specs halt (user must flip `Status: in-progress`); no applicable Spec on non-trivial work → Coder enters DISCOVERY MODE (single source of truth: `prompts/00-anchor.md` § Discovery protocol), writes `docs/requirements/<feature>/spec.md` from `kit/templates/requirements-spec.md`, and **stops for approval** before any code is touched.
+- **Planner is now optional.** The Coder can run Discovery itself when no Spec exists. Both entry points (Planner or Coder) produce the same Spec structure and the same `Status` discipline. The ship gate (`vibe-verify` + `/vibe-ship`) is unchanged and doesn't care which path produced the Spec.
+- **`tests/spec-first/test-spec-first-gate.sh`** — 46 assertions covering wiring (every installer references the gate), gate content (decision tree coverage), contradictory-wording removal, Spec/plan template invariance, vibe-verify and vibe-classify untouched, and 10-scenario gate simulation (no Spec + large → discover, awaiting-approval → halt, in-progress → resume, tiny → no Discovery, milestone scope only → no Discovery, draft (interrupted Discovery) → re-discover & halt, etc.).
+
+### Changed
+- **All 6 per-tool installers** (`kit/installers/{claude-code,generic,codex,cursor,antigravity,aider}/*`) — added a "Spec-first gate" section before the "Two-role model" section. "User bridges Planner → Coder" language softened to "user is the human-approval gate". The Coder-side line now reads "if no applicable Spec exists, runs Discovery itself".
+- **`skills/vibe-kit/SKILL.md`** — tagline rewritten from "Two roles. One spec." to "Spec-first. Planner optional. One workflow, two entry points." Removed the contradictory "I do not write code. I'm a Planner." line and replaced it with a role-aware statement (Planner-role vs Coder-role behavior).
+- **`kit/templates/CLAUDE.md`** and **`kit/templates/AGENTS.md`** — gained a "Spec-first gate" boundary section. AGENTS.md's `Always` block adds "Run the spec-first gate at every task start: no Spec, no code (unless trivial)".
+- **`README.md`** — new "Spec-first. Planner optional." subsection under "The workflow". "Two roles, one Spec" retitled to "Two entry points, one Spec". "User is the bridge" softened to "user is the human-approval gate".
+- **`docs/architecture.md`** — "Why two roles" retitled to "Why the Spec is the contract". "Conflating the two is the most common failure mode" reframed to "Conflating 'Spec' with 'Planner' is the most common failure mode". Added "When one tool plays both jobs" section describing the Coder-as-discoverer flow.
+- **`docs/playbook.md`** — section 3 retitled "Spec-first workflow (the headline)"; Planner marked optional.
+- **`docs/requirements-gathering.md`** — Step 4 acknowledges the Coder-as-discoverer path; same approval boundary holds.
+- **`prompts/README.md`** — "When one AI is doing both roles" retitled to "When one tool plays both jobs" with the spec-first gate as the answer.
+- **`install/cursor.md`** and **`install/README.md`** — softened Planner-side / Coder-side wording.
+
 ### Added — verify as a real gate + adaptive ceremony
 - **`kit/bin/vibe-verify`** — evidence-based AC verification. Each AC can carry a `Verification:` block with `automated test: <path::testname>` and `expected behavior: <text>`. The verifier checks: (a) test path is in the diff (excludes DELETED files so `git rm tests/` produces a hard FAIL), (b) `def <name>` appears in the file's diff (added or unchanged), (c) the detected test runner runs and tests pass. Falls back to keyword matching when no Verification block is given. Status model: PASS / PARTIAL / UNVERIFIED / FAIL with truthful exit codes (0 / 2 / 2 / 1). `VIBE_SHIP_OVERRIDE=1` lifts BLOCK but never FAIL.
 - **`kit/bin/vibe-classify`** — deterministic ceremony classifier. Reads `git status` / `diff`, returns tiny | normal | large | critical based on diff size + sensitive-path patterns (`/auth/`, `/billing/`, `/secrets/`, migrations). Conservative defaults: when in doubt it recommends the heavier ceremony. Outputs both human-readable and machine-parseable one-liner.

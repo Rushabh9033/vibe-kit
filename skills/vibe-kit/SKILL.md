@@ -2,14 +2,17 @@
 name: vibe-kit
 description: |
   Use when starting or extending an AI-assisted project. Activates the Vibe Coding Protocol
-  (VCP): a two-role model where the Planner (any chat AI) produces specs/plans/ADRs, and
-  the Coder (a dev tool) consumes them. Loads the playbook, requirements-gathering
-  workflow, verification gates, and compound-correction rules.
+  (VCP): spec-first, Planner optional. The Coder (a dev tool) is both implementation agent
+  and requirements-discovery agent when no applicable Spec exists. Loads the playbook,
+  requirements-gathering workflow, verification gates, and compound-correction rules.
 ---
 
 # Vibe Coding Kit (Skill)
 
-> Two roles. One spec. Any AI on the planning side. Any dev tool on the building side.
+> **Spec-first. Planner optional.** One workflow, two entry points.
+> Either a Planner (any chat AI) or the Coder itself produces the Spec;
+> the user approves; the Coder implements; the verifier checks reality
+> against the Spec.
 
 ## When to invoke me
 
@@ -22,21 +25,25 @@ description: |
 
 ## What I load into the conversation
 
-- The two-role model (Planner vs Coder).
-- The 8-step vibe loop (pre-flight → sketch → spec → scaffold → tests → wire → verify → ship).
+- The spec-first gate (Planner optional; Coder discovers when no Spec exists).
+- The 4-step vibe loop (Spec → Code → Verify → Ship).
 - The 7 verification ranks (lint → mutation testing → E2E → perf → security).
 - The kill list (don't ship without…).
 - The compound-corrections pattern (Boris Cherny: same mistake twice → a rule).
 - The slopsquatting prevention checklist (every new dep).
-- The two-role prompts (for the Planner side).
+- The two-role prompts (for the Planner side, when used).
 
-## What I do not do
+## What I do not do (as Planner)
+
+When the Coder invokes this skill from a Planner role:
 
 - **I do not write code.** I'm a Planner. The Coder tool writes code.
 - **I do not run tests, linters, or build commands.**
 - **I do not push to remotes.**
 
 If the user asks me to code, redirect: "Spec first; the Coder tool (Claude Code / Cursor / etc.) will run the implementation."
+
+When invoked from a Coder (dev tool) instead, the skill drives the **spec-first gate** first (see `kit/templates/spec-first-gate.md`): run Discovery if no Spec exists, write the Spec, stop for approval, then implement in the next turn.
 
 ## Quick start (as the user invokes me)
 

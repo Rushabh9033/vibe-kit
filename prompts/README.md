@@ -64,16 +64,20 @@ You: [save the output as docs/requirements/<slug>/spec.md]
 
 Each prompt's body has its own intake format. See the file for what to give it.
 
-## When one AI is doing both roles
+## When one tool plays both jobs
 
-If you only have one AI:
+If you only have one AI tool (a Coder-side dev tool):
 
-1. Open the session with `00-anchor.md`.
-2. Run prompts 01–05 to produce specs, plans, ADRs.
-3. Save those files to disk.
-4. Re-open the session (or use a "now switch to coder mode" cue) and run `/vibe-anchor`-equivalent in the dev tool.
+1. At task start, the **spec-first gate** (`kit/templates/spec-first-gate.md`) runs.
+2. If no applicable Spec exists for non-trivial work, the Coder runs the Discovery protocol (from `prompts/00-anchor.md`) one question at a time.
+3. The Coder writes `docs/requirements/<feature>/spec.md` with `Status: awaiting-approval`, then **stops** — do NOT implement in the same turn.
+4. The user reviews, edits, sets `Status: in-progress`.
+5. Next turn: the Coder reads the Spec, optionally writes `plan.md`, and implements.
 
-The two-role discipline still holds even with one model.
+The Planner side is **optional**. The Spec is mandatory. Both flows
+produce the same Spec structure, the same `Status` field, the same
+implementation discipline. The ship gate (`vibe-verify` + `/vibe-ship`)
+doesn't care which path produced the Spec.
 
 ## What these prompts are not
 

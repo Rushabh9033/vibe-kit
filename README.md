@@ -31,6 +31,25 @@ against the Spec; Ship is the boundary that holds.
 For larger work, supporting workflows exist (Plan, Decide, Handoff).
 You don't have to learn them. Use them when the work earns them.
 
+### Spec-first. Planner optional.
+
+The Spec is mandatory. The Planner is not — it is one of two entry
+points to producing the Spec:
+
+- **Planner entry**: open a chat AI (Claude.ai, ChatGPT, Gemini), run
+  `prompts/00-anchor.md` → Discovery → write `docs/requirements/<feature>/spec.md`.
+- **Coder entry**: open your dev tool (Claude Code, Cursor, etc.); at
+  task start, the spec-first gate (`kit/templates/spec-first-gate.md`)
+  runs. If no applicable Spec exists for non-trivial work, the Coder
+  runs Discovery itself, writes the Spec, and **stops for your approval**
+  before any code is touched.
+
+Either path produces the same Spec. The ship gate (`vibe-verify` +
+`/vibe-ship`) doesn't care which path produced it. The Planner is
+useful when the planning model has a longer context window than the
+coding tool, or when the user is not the coder. The Coder-as-discoverer
+is useful when you want one tool, one session.
+
 ```
    Human intent (vague, one line)
         ↓
@@ -63,7 +82,7 @@ Spec, implementation, verify output, a deliberate ship-blocker, and the fix.
 
 - It does **not** make the Spec self-enforce. The Spec is markdown; markdown cannot block a push on its own. Enforcement comes from the **verify + ship** boundary (see below).
 - It does **not** prove the code is correct. `vibe-verify` is an evidence/tripwire system: it catches missing tests, missing implementations, and constraint violations. It cannot prove a test exercises the AC. Use mutation testing (rank 4) for that.
-- It does **not** connect the Planner and the Coder automatically. The user is the bridge. The Planner writes a Spec; the user pastes it into the Coder tool.
+- It does **not** require a separate Planner session. The Coder can run Discovery itself when no Spec exists. The user is the human-approval gate between Spec and code — they decide when the Spec is ready to implement.
 - It does **not** own your repository. The pre-push hook is opt-in. `git push --no-verify` and `VIBE_SHIP_OVERRIDE=1` are escape hatches, documented.
 
 ## Ceremony scales with the work
@@ -197,16 +216,17 @@ vibe-kit/
 └── tests/                      ← verify + classify tests
 ```
 
-## Two roles, one Spec
+## Two entry points, one Spec
 
-| Role | What it does | Where it runs |
+| Entry point | What it does | Where it runs |
 |---|---|---|
-| **Planner** | Interviews you, surfaces ambiguity, writes the Spec | Any chat AI (Claude.ai, ChatGPT, Gemini). No file access needed. |
-| **Coder** | Reads the Spec, writes code and tests | Any dev tool with file access (Claude Code, Cursor, Aider, Antigravity, Codex). |
+| **Planner** *(optional)* | Interviews you, surfaces ambiguity, writes the Spec | Any chat AI (Claude.ai, ChatGPT, Gemini). No file access needed. |
+| **Coder** | Reads the Spec, writes code and tests. **Also runs Discovery itself when no Spec exists** for non-trivial work. | Any dev tool with file access (Claude Code, Cursor, Aider, Antigravity, Codex). |
 
-The user is the bridge. The Planner writes `spec.md`; the user pastes
-it into the Coder tool. The Coder has no idea the Planner existed;
-the Spec is the only context that survives the hand-off.
+The user is the human-approval gate. They flip `Status: awaiting-approval`
+→ `Status: in-progress` when the Spec is ready to implement. Either
+entry point can produce the Spec; the Coder's gate stops for approval
+regardless of who wrote it.
 
 ## Principle
 

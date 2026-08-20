@@ -2,18 +2,25 @@
 
 > The fundamental split. If you only read one architecture document, read this one.
 
-## Why two roles
+## Why the Spec is the contract
 
-Modern AI-assisted development is two different jobs wearing one name:
+Modern AI-assisted development is two different jobs wearing one name — but
+the Spec, not the Planner, is the bridge:
 
 | Job | Inputs | Outputs | Tools |
 |---|---|---|---|
-| **Planner** | A fuzzy goal, constraints, users, success metrics | Specs, plans, prompts, ADRs, edge-case lists, acceptance criteria | Any AI chat (Claude.ai, ChatGPT, Gemini, etc.) — context-rich, no file/command access needed |
+| **Spec producer** *(Planner OR Coder)* | A fuzzy goal, constraints, users, success metrics | Specs, plans, prompts, ADRs, edge-case lists, acceptance criteria | Any AI chat (Planner) OR the Coder itself (when no Spec exists) |
 | **Coder** | Spec + repo + runnable environment | Code, tests, handoffs, fixes | Dev tools with file/command access (Claude Code, Cursor, Antigravity, Aider, Codex, Windsurf) |
 
-Conflating the two is the most common failure mode. The Planner is good at synthesis, ambiguity resolution, and structured reasoning across long documents. The Coder is good at mechanical precision, type-checking, and respecting file conventions. When you make the same AI do both — and especially when you ask a chat-only model to "go code it" — you get half-plans and half-tests.
+The Spec is the contract — full stop. The Planner is **one way** to produce it.
+The Coder is **another way** (when no Spec exists, the Coder runs Discovery
+itself and writes the Spec, then **stops for approval** before implementing).
+Conflating "Spec" with "Planner" is the most common failure mode: teams
+assume they need two sessions, two tools, two windows. They don't. They need
+one Spec, approved by one human, then one Coder.
 
-**The spec is the contract** between roles. The Planner produces it; the Coder consumes it. No code generation happens until the spec exists.
+**No code generation happens until the Spec exists** — and the Spec has
+`Status: in-progress`. The user is the only one who can flip the Status.
 
 ## The handoff object
 
@@ -81,13 +88,13 @@ End of session:
   → Updates HANDOFF.md and CHANGELOG.md [Unreleased]
 ```
 
-## What goes wrong when you mix the roles
+## What goes wrong when you skip the Spec
 
 | Failure | Cause | Fix |
 |---|---|---|
-| AI "vibes" a spec while coding | Wrong model set (Coder doesn't write specs well) | Use Planner role for spec |
-| Spec is too vague to verify | Insufficient prompt (decompose-PRD was skipped) | Run all 5 prompts in order |
-| Code doesn't match spec | Coder didn't read the spec (workspace load order) | Use the `00-anchor` prompt first |
+| AI "vibes" a spec while coding | Spec was skipped or under-specified | The Coder runs Discovery itself before writing code (spec-first gate) |
+| Spec is too vague to verify | Insufficient prompt (decompose-PRD was skipped) | Run all 5 Planner prompts in order — or the Coder runs the Discovery protocol |
+| Code doesn't match spec | Coder didn't read the spec (workspace load order) | Spec-first gate runs at task start; reads `docs/requirements/<feature>/spec.md` if present |
 | Same mistake next session | No compound-correction persistence | Tool-level CLAUDE.md/AGENTS.md discipline |
 | AI hallucinates a package | No slopsquatting rule | `kit/rules/03-no-slopsquatting.md` |
 
@@ -114,20 +121,26 @@ cat docs/SPEC.md \
 
 That single file is the boundary. The Coder session can be on a different machine, in a different timezone, with a different model — the contract holds.
 
-## When one model has to play both roles
+## When one tool plays both jobs
 
-Sometimes you're prototyping and only have one AI. In that case:
+When you have one tool (Claude Code, Cursor, etc.) and no separate chat AI:
 
-1. Open with `prompts/00-anchor.md` — forces the model into Planner-thinking.
-2. Generate spec, plan, ADR.
-3. Save those to disk.
-4. Then switch the session into "Coder mode" by reloading with anchor prompt + a clear "now write code" framing.
-5. Run `/vibe-verify` before claiming done.
+1. At task start, the spec-first gate runs.
+2. If no applicable Spec exists for non-trivial work, the Coder enters
+   DISCOVERY MODE (canonical source: `prompts/00-anchor.md` § Discovery
+   protocol). It asks one question at a time.
+3. After Discovery, the Coder writes `docs/requirements/<feature>/spec.md`
+   from `kit/templates/requirements-spec.md` with `Status: awaiting-approval`.
+4. The Coder **stops**. It does not implement in the same turn.
+5. The user reviews, edits, and sets `Status: in-progress`.
+6. The next turn, the Coder re-reads the Spec and implements.
 
-This is worse than dedicated roles but workable. The spec is still the artifact.
+Same workflow, one tool. The Spec is still the artifact, and the
+human-approval gate is still the only one who can flip the Status.
 
 ## The principle
 
-> **Role clarity beats tool virtuosity.** The strongest single-AI workflow is worse than the weakest two-role workflow with a clear contract.
+> **Spec clarity beats role clarity.** The strongest workflow is one with a
+> clear Spec — regardless of whether one AI or two produced it.
 
 See `playbook.md` for the full playbook. See `requirements-gathering.md` for the most important workflow.

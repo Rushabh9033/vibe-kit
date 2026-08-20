@@ -23,12 +23,26 @@
 - Commit `.env*` files.
 - `rm -rf`, force-push, raw disk writes. → Codex must run `kit/bin/hooks/guard-unsafe.sh` first.
 
-## Two-role model
+## Spec-first gate (run at every task start)
 
-- **Planner side**: any chat AI + `prompts/`.
-- **Coder side**: Codex reads `AGENTS.md` + `docs/SPEC.md` on every command.
+> **Planner is optional. Spec-first is not.**
+
+Codex is the implementation agent **and** the requirements-discovery agent when no applicable Spec exists. Run the gate at `kit/templates/spec-first-gate.md`:
+
+1. Trivial change → proceed without a Spec.
+2. Existing in-progress Spec → resume.
+3. Awaiting-approval Spec → stop; the user must set `Status: in-progress`.
+4. No applicable Spec, non-trivial work → enter DISCOVERY MODE (`prompts/00-anchor.md` § Discovery protocol). One question at a time. Then write `docs/requirements/<feature>/spec.md` with `Status: awaiting-approval` and **stop**. Do NOT implement in the same turn.
+5. After approval, implement.
+
+The user is the human-approval gate, not a paste-bridge.
+
+## Two-role model (Planner optional)
+
+- **Planner side** *(optional)*: any chat AI + `prompts/`.
+- **Coder side**: Codex reads `AGENTS.md` + `docs/SPEC.md` on every command. **If no applicable Spec exists, runs Discovery itself** (see spec-first gate above).
 - **Verifier**: `kit/bin/vibe-verify` (run manually; Codex has no hook model).
-- The user bridges Planner → Coder. The spec is the bridge between intent and code.
+- The Spec is the bridge between intent and code. The Planner is one way to produce it.
 
 ## Codex notes
 

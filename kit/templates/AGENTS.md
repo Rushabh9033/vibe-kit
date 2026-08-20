@@ -33,6 +33,7 @@
 - Add tests for any new public function
 - Update `CHANGELOG.md [Unreleased]` after user-visible change
 - Update `docs/requirements/<feature>/plan.md` as work progresses
+- **Run the spec-first gate** (`kit/templates/spec-first-gate.md`) at every task start: no Spec, no code (unless trivial)
 
 ### Ask first
 - Adding a new dependency

@@ -26,12 +26,26 @@
 - Commit `.env*` files.
 - `rm -rf`, force-push, raw disk writes. → Antigravity's policy runner should block; if not, run `kit/bin/hooks/guard-unsafe.sh` first.
 
-## Two-role model
+## Spec-first gate (run at every task start)
 
-- **Planner side**: any chat AI + `prompts/`.
-- **Coder side**: Antigravity reads `.claude/rules/` + `.claude/commands/` + `AGENTS.md`.
+> **Planner is optional. Spec-first is not.**
+
+Antigravity is the implementation agent **and** the requirements-discovery agent when no applicable Spec exists. Run the gate at `kit/templates/spec-first-gate.md`:
+
+1. Trivial change → proceed without a Spec.
+2. Existing in-progress Spec → resume.
+3. Awaiting-approval Spec → stop; the user must set `Status: in-progress`.
+4. No applicable Spec, non-trivial work → enter DISCOVERY MODE (`prompts/00-anchor.md` § Discovery protocol). One question at a time. Then write `docs/requirements/<feature>/spec.md` with `Status: awaiting-approval` and **stop**. Do NOT implement in the same turn.
+5. After approval, implement.
+
+The user is the human-approval gate, not a paste-bridge.
+
+## Two-role model (Planner optional)
+
+- **Planner side** *(optional)*: any chat AI + `prompts/`.
+- **Coder side**: Antigravity reads `.claude/rules/` + `.claude/commands/` + `AGENTS.md`. **If no applicable Spec exists, runs Discovery itself** (see spec-first gate above).
 - **Verifier**: `kit/bin/vibe-verify` (run manually; check Antigravity's command-runner for an auto-fire option).
-- The user bridges Planner → Coder. The spec is the bridge between intent and code.
+- The Spec is the bridge between intent and code. The Planner is one way to produce it.
 
 ## Antigravity divergence notes
 

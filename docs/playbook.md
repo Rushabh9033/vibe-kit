@@ -44,14 +44,16 @@ project/
 
 Use `kit/bin/vibe-init` to scaffold any project.
 
-## 3. Two-role model (the headline)
+## 3. Spec-first workflow (the headline)
 
-| Role | Inputs | Outputs | Tools |
+| Stage | Inputs | Outputs | Tools |
 |---|---|---|---|
-| **Planner** | Goals, users, constraints | Specs, plans, ADRs, prompts, edge cases | Claude.ai, ChatGPT, Gemini, any long-context AI chat |
-| **Coder** | Spec + repo + runnable env | Code, tests, handoffs | Claude Code, Cursor, Antigravity, Aider, Codex, Windsurf |
+| **Spec producer** *(Planner OR Coder)* | Goals, users, constraints | Specs, plans, ADRs, prompts, edge cases | Claude.ai, ChatGPT, Gemini, any long-context AI chat — **or** the Coder itself (when no Spec exists) |
+| **Coder** | Approved Spec + repo + runnable env | Code, tests, handoffs | Claude Code, Cursor, Antigravity, Aider, Codex, Windsurf |
 
-The spec is the contract between roles. The Planner writes `docs/requirements/<feature>/spec.md`; the Coder consumes it.
+The Spec is the contract. Either role can produce it; the Coder consumes it.
+Planner is **optional**, not required. The Coder-as-discoverer path runs
+the spec-first gate at task start: no Spec, no code (unless trivial).
 
 ## 4. Requirements gathering (most important)
 

@@ -65,10 +65,15 @@ For each AC in the spec, write a corresponding test name in `plan.md`'s spec→t
 
 ## Step 4 — Implement (the Coder's job)
 
-The Coder reads `spec.md` + `plan.md` + the latest handoff, and walks the phases. The roles switch here:
+The Coder reads `spec.md` + `plan.md` + the latest handoff, and walks the phases. The roles:
 
-- **Planner should not write code.** Force the role boundary even when using one model.
-- **Coder should not rewrite the spec.** If something's wrong, file an issue; the Planner revises; the Coder re-reads.
+- **Planner should not write code.** Planner output is the Spec, the plan, ADRs.
+- **Coder should not rewrite the Spec.** If something's wrong, file an issue; the Planner (or the user) revises; the Coder re-reads.
+
+When the Coder is the same tool that produced the Spec, the **spec-first gate**
+(`kit/templates/spec-first-gate.md`) enforces this: the Coder writes the
+Spec, stops for approval, and only implements after the user sets
+`Status: in-progress`. The user is always the only one who can flip Status.
 
 ## Step 5 — Verify (don't accept "tests pass")
 

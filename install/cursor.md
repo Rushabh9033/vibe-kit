@@ -59,8 +59,8 @@ Or inline a condensed version:
 - Commit `.env*` files.
 
 ## Two-role model
-- Planner side: any chat AI with `prompts/` files.
-- Coder side: Cursor reads `.cursor/rules/` + `.cursor/commands/` per this install.
+- Planner side *(optional)*: any chat AI with `prompts/` files.
+- Coder side: Cursor reads `.cursor/rules/` + `.cursor/commands/` per this install. **If no applicable Spec exists, Cursor runs Discovery itself** (see `kit/templates/spec-first-gate.md`).
 - Spec at `docs/requirements/<feature>/spec.md` is the contract.
 - User bridges Planner → Coder.
 ```
@@ -97,8 +97,8 @@ You'll do the kill list manually. The rules in `.cursor/rules/` are advisory —
 
 ## Two-role usage
 
-- **Planner side**: Claude.ai / ChatGPT / Gemini with `prompts/` files.
-- **Coder side**: in Cursor, Cmd+K with the spec loaded via `@docs/requirements/<feature>/spec.md`.
+- **Planner side** *(optional)*: Claude.ai / ChatGPT / Gemini with `prompts/` files.
+- **Coder side**: in Cursor, Cmd+K with the spec loaded via `@docs/requirements/<feature>/spec.md`. If no Spec exists, the spec-first gate runs Discovery first.
 
 ## Auto-detect (from this kit)
 

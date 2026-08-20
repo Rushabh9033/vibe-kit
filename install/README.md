@@ -72,7 +72,7 @@ The pack is what `vibe-install` copies. Edit it if you want to tweak what each t
 
 For both roles of the workflow:
 
-- **Planner side**: any chat AI (Claude.ai, ChatGPT, Gemini). Use `prompts/` — no install needed.
-- **Coder side**: any dev tool — install the relevant kit files via `vibe-install`, which auto-picks the right pack.
+- **Planner side** *(optional)*: any chat AI (Claude.ai, ChatGPT, Gemini). Use `prompts/` — no install needed.
+- **Coder side**: any dev tool — install the relevant kit files via `vibe-install`, which auto-picks the right pack. **The Coder runs the spec-first gate at every task start; if no applicable Spec exists, it runs Discovery itself.**
 
 The user is the bridge between Planner and Coder. The spec is the bridge between intent and code.

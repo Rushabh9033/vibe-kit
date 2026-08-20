@@ -20,25 +20,41 @@ A persistent contract for AI coding. One AI writes a spec. Another AI implements
 - The user is in a non-coding context (writing an essay, debugging one bash command).
 - The user has explicitly opted out of structured workflows.
 
-## The two-role model
+## The spec-first gate (run this at every task start)
+
+> **Planner is optional. Spec-first is not.**
+
+This tool is both the **implementation agent** and the **requirements-discovery agent** when no applicable Spec exists. At every task start, run the gate at `kit/templates/spec-first-gate.md`:
+
+1. Trivial change (`vibe-classify: tiny`) → proceed without a Spec.
+2. Existing in-progress Spec → resume from where it stopped.
+3. Awaiting-approval Spec → stop; the user must flip Status to `in-progress`.
+4. No applicable Spec, non-trivial work → **enter DISCOVERY MODE** (canonical source: `prompts/00-anchor.md` § Discovery protocol). One question at a time. Then write `docs/requirements/<feature>/spec.md` with `Status: awaiting-approval` and **stop**. Do NOT implement in the same turn.
+5. After user sets `Status: in-progress`, re-read the Spec, optionally write `plan.md`, then implement.
+
+The user is the human-approval gate between Spec and code, not a paste-bridge between two AI tools.
+
+## The two-role model (Planner optional)
 
 ```
 ┌─────────────┐    spec.md  ┌──────────────┐    PR    ┌─────────────┐
 │  PLANNER AI │ ──────────► │  CODER AI    │ ────────►│  /vibe-     │
-│  (any chat) │             │  (this tool) │          │  verify     │
+│ (any chat,  │             │  (this tool, │          │  verify     │
+│  optional)  │             │  or a dev    │          │             │
+│             │             │  tool)       │          │             │
 └─────────────┘             └──────────────┘          └─────────────┘
-       ▲                                                    │
-       │                                                    ▼
-       │                                            ┌─────────────┐
-       └────────────────────────────────────────────│  HANDOFF.md │
-                                                    └─────────────┘
+                                ▲                                          │
+                                │                                          ▼
+                          may run Discovery                          ┌─────────────┐
+                          itself when no Spec                        │  HANDOFF.md │
+                          exists                                     └─────────────┘
 ```
 
-- **Planner side**: any chat AI (Claude.ai, ChatGPT, Gemini) reading `prompts/`. Produces spec.md + plan.md.
-- **Coder side**: this tool (Claude Code, Cursor, Aider, etc.) reading `docs/requirements/<feature>/spec.md` + this kit's slash commands.
-- **Verifier**: `./kit/bin/vibeverify` — diff-vs-spec check + test runner.
+- **Planner side** *(optional)*: any chat AI (Claude.ai, ChatGPT, Gemini) reading `prompts/`. Produces spec.md + plan.md.
+- **Coder side**: this tool (Claude Code, Cursor, Aider, etc.) reading `docs/requirements/<feature>/spec.md` + this kit's slash commands. **If no applicable Spec exists, the Coder runs Discovery itself** (per the spec-first gate above) before writing code.
+- **Verifier**: `./kit/bin/vibe-verify` — diff-vs-spec check + test runner.
 
-The user is the bridge between Planner and Coder. The spec is the bridge between intent and code.
+The Spec is the bridge between intent and code. The Planner is one way to produce it; the Coder is another.
 
 ## The 8 slash commands
 
