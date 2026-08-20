@@ -39,8 +39,15 @@ fi
 mkdir -p "$target_dir"
 filepath="$target_dir/${date}-${slug}.md"
 
-# Idempotent: skip if file already exists.
-[ -f "$filepath" ] && exit 0
+# Per-invocation uniqueness: if a handoff for this date+slug already
+# exists, append a uniqueness suffix so each Stop-hook fire produces a
+# fresh artifact (the "idempotent skip" hides multi-session days).
+if [ -f "$filepath" ]; then
+  uniqueness="${CLAUDE_SESSION_ID:-}"
+  uniqueness="$(printf '%s' "$uniqueness" | cut -c1-8)"
+  [ -z "$uniqueness" ] && uniqueness="epoch-$(date +%s)-$$"
+  filepath="$target_dir/${date}-${slug}-${uniqueness}.md"
+fi
 
 # Refuse if cwd-base contains unsafe characters (we control the path here;
 # but be defensive against weirdness in $HOME or cwd paths).
