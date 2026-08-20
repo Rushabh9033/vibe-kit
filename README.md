@@ -1,5 +1,7 @@
 # Vibe Coding Kit (`vibe-kit`)
 
+**by Rushabh Mavani** — `vibe-kit by rushabh mavani`
+
 > Two roles. One spec. Any AI on the planning side, any dev tool on the building side.
 
 ```
@@ -155,4 +157,4 @@ git init
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT — Copyright © 2026 Rushabh Mavani. See [LICENSE](LICENSE).
