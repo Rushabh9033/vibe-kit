@@ -76,12 +76,20 @@ detect_runner() {
   fi
 }
 
-# Diff against the feature's base: HEAD~1 if it exists, else unstaged.
+# Compute both the file-list (for scope creep) and the full diff text (for AC matching).
+# Match against full diff text — file NAMES alone miss ACs that refer to code behavior
+# (e.g., "script greps the git diff" should match a file named verify.sh whose body
+# actually runs grep).
 compute_diff() {
   if git -C "$CWD" rev-parse HEAD~1 >/dev/null 2>&1; then
-    git -C "$CWD" diff --name-only HEAD~1..HEAD
+    DIFF_NAMES="$(git -C "$CWD" diff --name-only HEAD~1..HEAD)"
+    DIFF_TEXT="$(git -C "$CWD" diff HEAD~1..HEAD)"
   else
-    git -C "$CWD" diff --name-only
+    # Only one commit; show all files it touched (excluding .git internals).
+    DIFF_NAMES="$(git -C "$CWD" show --name-only --format='' HEAD 2>/dev/null | grep -v '^$' \
+      || git -C "$CWD" diff --name-only)"
+    DIFF_TEXT="$(git -C "$CWD" show HEAD 2>/dev/null \
+      || git -C "$CWD" diff)"
   fi
 }
 
@@ -108,9 +116,13 @@ main() {
     exit 1
   fi
 
-  diff="$(compute_diff)"
+  DIFF_NAMES="" DIFF_TEXT=""
+  compute_diff
+  local diff="$DIFF_TEXT"
   local diff_count
-  diff_count="$(printf '%s' "$diff" | grep -c . 2>/dev/null || echo 0)"
+  diff_count="$(printf '%s' "$DIFF_NAMES" | grep -c . 2>/dev/null | head -1)"
+  diff_count="${diff_count:-0}"
+  diff_count="$(printf '%d' "$diff_count" 2>/dev/null || echo 0)"
 
   echo "AC contract:"
   local pass=0 fail=0 missing_acs=""
@@ -164,7 +176,7 @@ main() {
   if [ "$diff_count" -eq 0 ]; then
     echo "  (no diff)"
   else
-    printf '%s\n' "$diff" | sed 's/^/  /'
+    printf '%s\n' "$DIFF_NAMES" | sed 's/^/  /'
   fi
 
   # ---------- overall ----------

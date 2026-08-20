@@ -2,7 +2,28 @@
 description: Write a session handoff doc
 ---
 
-Write `docs/handoffs/$(date +%Y-%m-%d)-<slug>.md` using the template at `~/.claude/vibe-kit/templates/handoff.md`. Branch-name slug if no other slug.
+Write a session handoff doc so the next session (or another agent) can resume without re-discovering context.
+
+## What it does
+
+1. Determine today's date and the current git branch slug.
+2. Use the template at `kit/templates/handoff.md`.
+3. Fill every section from observable state (git log, files changed since session start, recent spec/plan/ADR diffs).
+4. Write to `docs/handoffs/<date>-<slug>.md` (or fallback `$HOME/.claude/projects/<cwd-base>/handoffs/`).
+5. Append a 5-line TL;DR to `HANDOFF.md` pointing at the new file.
+
+## When to use
+
+- At the end of any session that touched code.
+- Before context loss (long pause, model switch, end-of-day).
+- Whenever the user types `/vibe-handoff`.
+
+## Usage
+
+```
+/vibe-handoff
+/vibe-handoff profile-photo-upload   # optional: feature slug for context
+```
 
 ## Required sections
 
@@ -18,4 +39,23 @@ Write `docs/handoffs/$(date +%Y-%m-%d)-<slug>.md` using the template at `~/.clau
 - **Next steps for next session** — concrete, ordered.
 - **Gotchas learned** — non-obvious things the next session will hit.
 
-After writing, update `HANDOFF.md` with a 5-line TL;DR pointing at the new file.
+## Output
+
+```
+docs/handoffs/<date>-<slug>.md     (~1-3 KB, sections complete)
+HANDOFF.md                          (+5-line TL;DR)
+```
+
+Print after writing:
+
+```
+handoff: docs/handoffs/<date>-<slug>.md
+sections: <count> complete
+next-session hook: <first concrete step>
+```
+
+## Limits
+
+- Keep it tight — bullet points and one-liners only. Full prose belongs in the spec/ADR, not the handoff.
+- Don't fabricate sections. If a section is empty, write `(none)` and move on.
+- Don't modify the metadata footer (session_id, started, cwd, branch, written_by).

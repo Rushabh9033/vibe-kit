@@ -2,13 +2,31 @@
 description: Write an Architecture Decision Record (ADR)
 ---
 
-Write `docs/decisions/NNNN-<slug>.md` per the template at `~/.claude/vibe-kit/templates/ADR.md`.
+Write `docs/decisions/NNNN-<slug>.md` per the template at `kit/templates/ADR.md`. The number is sequential — always check the existing directory first.
 
-## Numbering
+## What it does
 
-- Sequential, starting from the highest existing NNNN in `docs/decisions/`.
-- Always check the existing directory before numbering.
-- Use leading zeros to 4 digits: `0001`, `0002`, ..., `0042`, `0123`.
+1. Find the highest existing NNNN in `docs/decisions/`.
+2. Increment by 1; pad to 4 digits (`0001`, `0002`, ...).
+3. Render the ADR template with the user's decision context.
+4. If the decision **reverses** a prior ADR, mark the prior ADR `Superseded by NNNN` (only the Status field — never edit the body).
+5. Write the file. Don't link it from anywhere else — the spec/plan that triggered the decision will pick it up.
+
+## When to use
+
+- Framework / language / database choice.
+- Vendor selection (auth provider, payment processor, observability stack).
+- Model + provider + budget selection (AI decisions belong in ADRs).
+- Architecture pattern (sync vs async, monolith vs service).
+- Deprecation of a feature or pattern.
+- Anything irreversible, controversial, or repeated.
+
+## Usage
+
+```
+/vibe-decide use-postgres-for-events
+/vibe-decide deprecate-mongodb-usage
+```
 
 ## Required sections
 
@@ -23,16 +41,23 @@ Write `docs/decisions/NNNN-<slug>.md` per the template at `~/.claude/vibe-kit/te
 - **Confirmation**: how compliance with the ADR will be verified.
 - **Pros and cons of the options**.
 
-## If the decision reverses a prior ADR
+## Output
 
-- Open the prior ADR; mark it `Superseded by NNNN` (the new one).
-- Do not edit prior ADR body — only the status.
+```
+docs/decisions/NNNN-<slug>.md     Status: Proposed
+```
 
-## When to write one
+Print after writing:
 
-- Framework / language / database choice.
-- Vendor selection (auth provider, payment processor, observability stack).
-- Model + provider + budget selection (AI decisions belong in ADRs).
-- Architecture pattern (sync vs async, monolith vs service).
-- Deprecation of a feature or pattern.
-- Anything irreversible, controversial, or repeated.
+```
+adr: docs/decisions/NNNN-<slug>.md
+status: Proposed
+supersedes: <prior-adr-or-none>
+next: link from the spec/plan that triggered this decision; flip Status to Accepted once ratified
+```
+
+## Limits
+
+- Don't auto-flip Status to `Accepted` — that's a human ratification. Default to `Proposed`.
+- If the prior ADR is `Accepted`, the new one should explicitly call out the reversal in **Decision drivers**.
+- Never edit a prior ADR's body — only the `Status` field can change.
