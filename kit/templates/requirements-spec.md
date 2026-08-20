@@ -1,9 +1,21 @@
 # Feature: <Name>
 
-Status: draft | in-progress | shipped
+Status: draft | awaiting-approval | in-progress | shipped
 Owner: @handle
 Last updated: YYYY-MM-DD
 Linked milestone: docs/SPEC.md ## M1
+
+## Human approval
+
+> The Planner does NOT auto-approve this spec. The user must read it, edit
+> anything they want different, and set `Status` to `in-progress` before the
+> Coder touches it. This is the only gate that catches intent errors before
+> they become code errors.
+
+- [ ] User has read spec end-to-end
+- [ ] User has edited anything they want changed
+- [ ] User has set `Status: in-progress`
+- [ ] User has explicitly said "approved" or "ship it" in chat
 
 ## Scope
 <One paragraph. What this is.>

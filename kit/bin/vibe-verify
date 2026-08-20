@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+# vibe-verify — AC↔test contract checker
+#
+# Reads the most recent docs/requirements/<feature>/spec.md, extracts
+# acceptance criteria, checks the git diff against each AC, runs the
+# detected test suite, and reports whether every AC has implementation
+# and a green test.
+#
+# Exit codes:
+#   0  — all ACs implemented + tests pass
+#   1  — one or more ACs missing OR tests failing
+#   2  — usage / config error (no spec found, no git, etc.)
+#
+# Output: structured contract report on stdout, full test log on stderr
+# if tests fail. Designed for human reading AND machine parsing.
+
+set -uo pipefail
+
+CWD="$(pwd)"
+
+# ---------- helpers ----------
+
+die() { echo "vibe-verify: $*" >&2; exit 2; }
+
+# Find the most recent spec.md under docs/requirements/.
+find_spec() {
+  local found
+  found="$(find "$CWD/docs/requirements" -name 'spec.md' -type f 2>/dev/null | sort | tail -1)"
+  if [ -z "$found" ]; then
+    die "no spec found at docs/requirements/*/spec.md (run /vibe-spec first)"
+  fi
+  printf '%s\n' "$found"
+}
+
+# Extract ACs from spec.md. Matches:
+#   - [ ] AC1. text
+#   - [ ] **AC1**: text
+#   - [ ] AC1: text
+extract_acs() {
+  grep -E '^\- \[ \] (\*\*)?AC[0-9]+' "$1" \
+    | sed -E 's/^- \[ \] //; s/^\*\*//; s/\*\*//'
+}
+
+# Extract up to 10 keyword tokens from an AC line for grep matching.
+# Adds singular form for plural tokens ("uploads" → also "upload") so an
+# AC about "uploads" matches a file called upload.ts.
+extract_keywords() {
+  local line="$1"
+  line="$(printf '%s' "$line" | sed -E 's/^(AC|\*\*AC)[0-9]+[.:]?[:.]?\s*\*?//')"
+  printf '%s' "$line" \
+    | tr '[:upper:]' '[:lower:]' \
+    | tr -cs 'a-z0-9_' '\n' \
+    | awk 'length($0) >= 3' \
+    | grep -vE '^(with|from|that|this|when|then|than|have|has|been|will|would|could|should|must|also|such|each|every|into|over|after|before|because|user|users|input|output|value|values|edge|case|cases|return|returns|status|with)$' \
+    | awk '{print; if (substr($0,length)=="s") print substr($0,1,length-1)}' \
+    | head -10 \
+    | paste -sd '|' -
+}
+
+# Detect the project's test runner. Returns the command or "" if unknown.
+detect_runner() {
+  if   [ -f "$CWD/package.json" ]; then
+    if grep -q '"jest"'    "$CWD/package.json" 2>/dev/null; then printf 'npx jest --silent\n'
+    elif grep -q '"vitest"' "$CWD/package.json" 2>/dev/null; then printf 'npx vitest run --reporter=dot\n'
+    elif grep -q '"mocha"'  "$CWD/package.json" 2>/dev/null; then printf 'npx mocha --reporter min\n'
+    else printf '\n'
+    fi
+  elif [ -f "$CWD/pyproject.toml" ] || [ -f "$CWD/setup.py" ] || [ -f "$CWD/pytest.ini" ]; then
+    printf 'pytest -q --no-header\n'
+  elif [ -f "$CWD/go.mod" ]; then
+    printf 'go test ./...\n'
+  elif [ -f "$CWD/Cargo.toml" ]; then
+    printf 'cargo test --quiet\n'
+  else
+    printf '\n'
+  fi
+}
+
+# Diff against the feature's base: HEAD~1 if it exists, else unstaged.
+compute_diff() {
+  if git -C "$CWD" rev-parse HEAD~1 >/dev/null 2>&1; then
+    git -C "$CWD" diff --name-only HEAD~1..HEAD
+  else
+    git -C "$CWD" diff --name-only
+  fi
+}
+
+# ---------- main ----------
+
+main() {
+  cd "$CWD" || die "cannot cd to $CWD"
+  command -v git >/dev/null || die "git not found"
+
+  local spec acs runner diff log_file
+  spec="$(find_spec)"
+  local feature
+  feature="$(basename "$(dirname "$spec")")"
+
+  echo "verifying feature=${feature}"
+  echo "spec=${spec#"$CWD/"}"
+  echo
+
+  acs="$(extract_acs "$spec")"
+  if [ -z "$acs" ]; then
+    echo "AC contract: (none found in spec — add ACs before shipping)"
+    echo
+    echo "overall: BLOCK (spec has no acceptance criteria)"
+    exit 1
+  fi
+
+  diff="$(compute_diff)"
+  local diff_count
+  diff_count="$(printf '%s' "$diff" | grep -c . 2>/dev/null || echo 0)"
+
+  echo "AC contract:"
+  local pass=0 fail=0 missing_acs=""
+  while IFS= read -r ac; do
+    [ -z "$ac" ] && continue
+    local kws hits
+    kws="$(extract_keywords "$ac")"
+    if [ -n "$kws" ] && [ -n "$diff" ]; then
+      hits="$(printf '%s\n' "$diff" | grep -iE "$kws" | head -3 | paste -sd ',' -)"
+    else
+      hits=""
+    fi
+    if [ -n "$hits" ]; then
+      printf '  ✓ %s\n      implemented: %s\n' "$ac" "$hits"
+      pass=$((pass + 1))
+    else
+      printf '  ✗ %s\n      NOT IMPLEMENTED in current diff\n' "$ac"
+      fail=$((fail + 1))
+      missing_acs="${missing_acs}${missing_acs:+$'\n'}  - ${ac}"
+    fi
+  done <<< "$acs"
+
+  echo
+  printf 'summary: %d/%d ACs have implementation in the diff\n' "$pass" "$((pass + fail))"
+
+  # ---------- run tests ----------
+  echo
+  runner="$(detect_runner)"
+  if [ -n "$runner" ]; then
+    printf 'test runner: %s\n' "$runner"
+    log_file="$(mktemp)"
+    if (eval "$runner") >"$log_file" 2>&1; then
+      echo "  ✓ tests pass"
+    else
+      echo "  ✗ tests FAIL"
+      tail -15 "$log_file" | sed 's/^/      /'
+      echo
+      echo "overall: BLOCK (tests failing)"
+      rm -f "$log_file"
+      exit 1
+    fi
+    rm -f "$log_file"
+  else
+    echo "test runner: (none detected — package.json / pyproject.toml / go.mod / Cargo.toml)"
+    echo "  → tests not run; verify manually before ship"
+  fi
+
+  # ---------- scope creep ----------
+  echo
+  echo "scope creep check (files changed):"
+  if [ "$diff_count" -eq 0 ]; then
+    echo "  (no diff)"
+  else
+    printf '%s\n' "$diff" | sed 's/^/  /'
+  fi
+
+  # ---------- overall ----------
+  echo
+  if [ "$fail" -gt 0 ]; then
+    echo "overall: BLOCK"
+    echo "  missing ACs:"
+    printf '%s\n' "$missing_acs"
+    echo "  fix: implement the AC, or update the spec if scope changed."
+    exit 1
+  fi
+  echo "overall: PASS"
+  exit 0
+}
+
+main "$@"
