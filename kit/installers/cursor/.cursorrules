@@ -1,0 +1,66 @@
+# Vibe Coding Protocol — Cursor conventions sink
+#
+# Cursor reads this file on every Composer invocation. Drop the kit's full
+# rules into .cursor/rules/ for topic-scoped advice (see README.md in this dir).
+#
+# Auto-detection: vibe-install picks this pack when it sees .cursor/ or .cursorrules
+# in the cwd, or CURSOR_TRACE_ID / CURSOR_SESSION_ID in the env.
+
+## Always
+
+- Run lint + typecheck + tests before declaring done.
+- Reject any new dep that isn't registry-verified (`npm view <name> version`) and license-audited.
+- Document gotchas in `docs/gotchas.md` on discovery.
+- Run `/vibe-verify` (mapped to Composer command) before claiming done on any user-visible feature.
+- Update `CHANGELOG.md [Unreleased]` for user-visible changes.
+- Write `docs/handoffs/<date>-<slug>.md` at session end (you do this manually — Cursor has no Stop hook).
+
+## Never
+
+- Edit committed migrations. → create a new one.
+- Disable lint rules or bypass tests (`--no-verify`, `skip-ci`, `eslint-disable`) without justification.
+- Hardcode secrets, tokens, URLs, environment-specific values.
+- Use TypeScript `any` without justification.
+- Commit `.env*` files.
+- `rm -rf`, force-push, recursive deletes. → run `kit/bin/hooks/guard-unsafe.sh` first.
+
+## Two-role model
+
+- **Planner side**: any chat AI (Claude.ai, ChatGPT, Gemini) with `prompts/` files. No install.
+- **Coder side**: Cursor reads `.cursor/rules/` + `.cursorrules` + `.cursor/commands/`.
+- **Verifier**: `kit/bin/vibe-verify` (run manually; not auto-fired).
+- The user bridges Planner → Coder. The spec is the bridge between intent and code.
+
+## Spec is the contract
+
+- `docs/SPEC.md` — milestone-level.
+- `docs/requirements/<feature>/spec.md` — feature-level contract.
+- Each acceptance criterion = one test.
+- When in doubt, the spec wins. Update the spec before changing the code, not after.
+
+## Slash commands
+
+The kit's `/vibe-*` commands work in Cursor (same `.md` format). Invoke in Composer:
+
+- `/vibe-spec profile-photo-upload` — write feature spec
+- `/vibe-verify` — AC↔test checker
+- `/vibe-handoff` — write handoff doc
+- `/vibe-ship` — CHANGELOG + handoff + ready-to-commit
+
+## What Cursor doesn't auto-fire (vs Claude Code)
+
+| Claude Code | Cursor |
+|---|---|
+| PostToolUse-on-Edit (format) | Composer has built-in formatter on save |
+| PreToolUse-on-Bash (guard) | **No equivalent** — run `kit/bin/hooks/guard-unsafe.sh` manually |
+| Stop-time handoff | **No equivalent** — call `/vibe-handoff` at session end |
+
+You do the kill list manually. The rules in `.cursor/rules/` are advisory — Cursor reads them but doesn't *enforce*.
+
+## When to switch to Claude Code
+
+- Need destructive-pattern guard on Bash.
+- Need Stop-time handoff automation.
+- Need per-session memory persistence.
+
+Or run both: Cursor for editing, Claude Code on `/vibe-review-pr` for a second pair of eyes.

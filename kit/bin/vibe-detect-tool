@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# vibe-detect-tool — figure out which AI dev tool is being used in this cwd.
+#
+# Used by:
+#   - vibe-install (to auto-pick the right per-tool install)
+#   - vibe-init    (to write tool-specific scaffolding hints into AGENTS.md)
+#   - humans       (to debug "which tool am I in right now?")
+#
+# Detection priority (highest confidence first):
+#   1. Environment variables set by the tool's runtime
+#   2. Tool-specific config files in the cwd
+#   3. Fallback: "generic"
+#
+# Output:
+#   Line 1 — machine-parseable: <tool> | <install-form> | <config-dir>
+#   Lines 2..N — human-readable: install paths and notes
+#
+# Exit codes:
+#   0 — detected (specific tool)
+#   1 — detected ("generic" fallback)
+#   2 — usage / config error
+
+set -uo pipefail
+
+# --- detection routines (each prints the tool name on match) ---
+
+detect_claude_code() {
+  if [ -n "${CLAUDE_CODE:-}" ] || [ -n "${CLAUDE_PROJECT_DIR:-}" ] || [ -n "${CLAUDE_SESSION_ID:-}" ]; then
+    echo "claude-code"; return 0
+  fi
+  if [ -d "$HOME/.claude" ] && [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+    echo "claude-code"; return 0
+  fi
+  return 1
+}
+
+detect_cursor() {
+  if [ -n "${CURSOR_TRACE_ID:-}" ] || [ -n "${CURSOR_SESSION_ID:-}" ]; then
+    echo "cursor"; return 0
+  fi
+  if [ -d ".cursor" ] || [ -f ".cursorrules" ]; then
+    echo "cursor"; return 0
+  fi
+  return 1
+}
+
+detect_antigravity() {
+  if [ -n "${ANTIGRAVITY_SESSION:-}" ] || [ -n "${ANTIGRAVITY_WORKSPACE:-}" ]; then
+    echo "antigravity"; return 0
+  fi
+  if [ -d ".agent" ] || [ -f ".antigravity" ]; then
+    echo "antigravity"; return 0
+  fi
+  return 1
+}
+
+detect_aider() {
+  if [ -n "${AIDER_MODEL:-}" ] || [ -n "${AIDER_CHAT_HISTORY:-}" ]; then
+    echo "aider"; return 0
+  fi
+  if [ -f ".aider.conf.yml" ] || [ -f ".aider.chat.history" ] || [ -f "CONVENTIONS.md" ]; then
+    echo "aider"; return 0
+  fi
+  return 1
+}
+
+detect_codex() {
+  if [ -n "${CODEX_SESSION_ID:-}" ] || [ -n "${CODEX_HOME:-}" ]; then
+    echo "codex"; return 0
+  fi
+  if [ -d ".codex" ]; then
+    echo "codex"; return 0
+  fi
+  return 1
+}
+
+# --- install-form mapping ---
+
+print_install_form() {
+  local tool="$1"
+  case "$tool" in
+    claude-code)
+      cat <<'EOF'
+rules-dir=$HOME/.claude/rules
+commands-dir=$HOME/.claude/commands
+settings=$HOME/.claude/settings.json
+notes=raw global install; hooks auto-fire
+EOF
+      ;;
+    cursor)
+      cat <<'EOF'
+rules-dir=.cursor/rules
+commands-dir=.cursor/commands
+conventions=.cursorrules
+notes=advisory only; no hooks; manually run kill list
+EOF
+      ;;
+    antigravity)
+      cat <<'EOF'
+rules-dir=.claude/rules
+commands-dir=.claude/commands
+settings=.claude/settings.json
+notes=claude-code-compatible; per-tool auto-format replaces PostToolUse hook
+EOF
+      ;;
+    aider)
+      cat <<'EOF'
+rules-dir=.aider/rules
+conventions=CONVENTIONS.md
+config=.aider.conf.yml
+notes=no slash commands; /command flags map to vibe-* intent
+EOF
+      ;;
+    codex)
+      cat <<'EOF'
+rules-dir=.codex/rules
+commands-dir=.codex/commands
+notes=experimental; check upstream for hook support
+EOF
+      ;;
+    generic|*)
+      cat <<'EOF'
+rules-dir=.vibe-kit/rules
+commands-dir=.vibe-kit/commands
+notes=fallback; user runs vibe-init to scaffold AGENTS.md and docs/
+EOF
+      ;;
+  esac
+}
+
+# --- main ---
+
+tool=""
+for try in detect_claude_code detect_cursor detect_antigravity detect_aider detect_codex; do
+  if result="$($try 2>/dev/null)"; then
+    tool="$result"
+    break
+  fi
+done
+
+if [ -z "$tool" ]; then
+  tool="generic"
+fi
+
+case "$tool" in
+  claude-code) form="global-raw";              dir="$HOME/.claude" ;;
+  cursor)      form="project-advisory";        dir=".cursor"       ;;
+  antigravity) form="project-claude-compat";   dir=".claude"       ;;
+  aider)       form="project-conventions";     dir="."             ;;
+  codex)       form="project-experimental";    dir=".codex"        ;;
+  *)           form="raw-fallback";            dir=".vibe-kit"     ;;
+esac
+
+printf '%s | %s | %s\n' "$tool" "$form" "$dir"
+print_install_form "$tool"
+
+if [ "$tool" = "generic" ]; then
+  exit 1
+fi
+exit 0

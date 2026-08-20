@@ -3,18 +3,35 @@
 vibe-init — bootstrap a project to Vibe Coding Protocol (VCP) standard.
 
 Usage:
-  vibe-init                 # initialize current directory
+  vibe-init                 # initialize current directory; skip files that exist
   vibe-init --check         # report what would be created, do nothing
-  vibe-init --update        # refresh docs/ files (don't touch existing AGENTS.md/CLAUDE.md)
+  vibe-init --update        # refresh generated docs; don't touch hand-curated ones
+  vibe-init --add           # alias for default; non-destructive add to existing project
+  vibe-init --tool=auto     # detect the AI dev tool in use; print install hints
+
+Existing-project behavior (--add is the default):
+  - Creates missing directories (docs/requirements, docs/decisions, .claude, .github).
+  - Skips files that already exist (AGENTS.md, CHANGELOG.md, CLAUDE.md, gotchas.md,
+    PR template, SPEC.md, ARCHITECTURE.md).
+  - Appends a marker block to .gitignore if it already has content; creates it
+    if missing.
+  - Never overwrites hand-curated content unless --update is passed.
 """
 import argparse
 import shutil
+import subprocess
 import sys
 from datetime import date
 from pathlib import Path
 
 KIT = Path.home() / ".claude" / "vibe-kit"
 TEMPLATES = KIT / "templates"
+
+# When running from the cloned repo (development / vendoring), prefer the
+# in-repo templates so updates to kit/templates/ take effect immediately.
+_DEV_REPO_TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
+if _DEV_REPO_TEMPLATES.is_dir():
+    TEMPLATES = _DEV_REPO_TEMPLATES
 
 GITIGNORE_APPEND = "\n# Vibe Coding Protocol\n.env*\nCLAUDE.local.md\n.vibe-cache/\n"
 
@@ -227,9 +244,25 @@ def bootstrap(cwd: Path, check: bool = False, update: bool = False) -> int:
 def main() -> int:
     p = argparse.ArgumentParser(prog="vibe-init")
     p.add_argument("--check", action="store_true", help="report only; write nothing")
-    p.add_argument("--update", action="store_true", help="refresh generated docs; don't touch AGENTS.md/CLAUDE.md/CHANGELOG.md/gotchas.md/PR template")
+    p.add_argument("--update", action="store_true", help="refresh generated docs; don't touch hand-curated ones")
+    p.add_argument("--add", action="store_true", help="alias for default; non-destructive add to existing project (skip files that exist)")
+    p.add_argument("--tool", default=None, help="detect AI dev tool in use (auto); prints tool name + install hints, doesn't write")
     p.add_argument("--root", default=".", help="target directory (default: cwd)")
     args = p.parse_args()
+
+    if args.tool:
+        # Detection-only mode: defer to vibe-detect-tool if available, else
+        # inline a minimal detection here so the user always gets an answer.
+        try:
+            rc = subprocess.call(
+                [str(KIT / "bin" / "vibe-detect-tool")],
+                cwd=args.root,
+            )
+            return rc
+        except FileNotFoundError:
+            print(f"vibe-init: tool={args.tool or 'unknown'} (vibe-detect-tool not installed)")
+            return 1
+
     return bootstrap(Path(args.root).resolve(), check=args.check, update=args.update)
 
 

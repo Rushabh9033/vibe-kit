@@ -1,0 +1,273 @@
+#!/usr/bin/env bash
+# vibe-install — install vibe-kit into the current project, auto-detecting
+# the AI dev tool in use.
+#
+# Usage:
+#   vibe-install                  # auto-detect tool, install in cwd
+#   vibe-install --tool=cursor    # override detection
+#   vibe-install --root=/path/to/project
+#   vibe-install --check          # report what would be installed; do nothing
+#   vibe-install --global         # Claude Code only: install to ~/.claude/
+#
+# What it does:
+#   1. Detects the tool (calls kit/bin/vibe-detect-tool).
+#   2. Copies the matching installer pack from kit/installers/<tool>/
+#   3. Copies kit/rules/ + kit/commands/ into the tool's rules/commands dir.
+#   4. Copies kit/CLAUDE.md → AGENTS.md (master rules).
+#   5. Runs kit/bin/vibe-init to scaffold docs/, .github/, .gitignore.
+#      (skips files that exist; existing-project-safe by default)
+#
+# Existing-project behavior:
+#   - Skips files that exist (unless --update is passed to vibe-init).
+#   - Creates missing directories.
+#   - Appends to .gitignore if it exists.
+#   - Never overwrites hand-curated content unless explicitly asked.
+#
+# Tool-specifics:
+#   - claude-code: global install at ~/.claude/ (--global). Otherwise
+#     project install at .claude/.
+#   - antigravity: project install at .claude/ (compatible layout).
+#   - cursor: project install at .cursor/ + .cursorrules.
+#   - aider: project install with CONVENTIONS.md + .aider.conf.yml.
+#   - codex: project install with AGENTS.md.
+#   - generic: project install with AGENTS.md.
+#
+# Exit codes:
+#   0  — installed successfully
+#   1  — installed but no specific tool detected (generic fallback)
+#   2  — usage / config error
+
+set -uo pipefail
+
+# --- locate kit ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+KIT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# When the kit is global-installed, the same files live at a different path.
+GLOBAL_KIT="$HOME/.claude/vibe-kit"
+GLOBAL_BIN="$GLOBAL_KIT/bin"
+
+# --- args ---
+TOOL=""
+ROOT="$(pwd)"
+CHECK=0
+GLOBAL=0
+UPDATE=0
+INIT_ONLY=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --tool=*)    TOOL="${1#*=}" ;;
+    --root=*)    ROOT="${1#*=}" ;;
+    --check)     CHECK=1 ;;
+    --global)    GLOBAL=1 ;;
+    --update)    UPDATE=1 ;;
+    --init-only) INIT_ONLY=1 ;;
+    -h|--help)
+      sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *)  echo "vibe-install: unknown flag: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+cd "$ROOT" || { echo "vibe-install: cannot cd to $ROOT" >&2; exit 2; }
+ROOT="$(pwd)"
+
+# --- detect tool ---
+if [ -z "$TOOL" ] || [ "$TOOL" = "auto" ]; then
+  if [ -x "$GLOBAL_BIN/vibe-detect-tool" ]; then
+    DETECT_OUT="$("$GLOBAL_BIN/vibe-detect-tool" 2>/dev/null)" || DETECT_OUT=""
+  fi
+  if [ -z "$DETECT_OUT" ] && [ -x "$KIT_ROOT/bin/vibe-detect-tool" ]; then
+    DETECT_OUT="$("$KIT_ROOT/bin/vibe-detect-tool" 2>/dev/null)" || DETECT_OUT=""
+  fi
+  if [ -z "$DETECT_OUT" ] && [ -x "$SCRIPT_DIR/vibe-detect-tool" ]; then
+    DETECT_OUT="$("$SCRIPT_DIR/vibe-detect-tool" 2>/dev/null)" || DETECT_OUT=""
+  fi
+  if [ -n "$DETECT_OUT" ]; then
+    TOOL="$(printf '%s\n' "$DETECT_OUT" | head -1 | cut -d'|' -f1 | tr -d ' ')"
+  else
+    TOOL="generic"
+  fi
+fi
+
+case "$TOOL" in
+  claude-code|cursor|antigravity|aider|codex|generic) ;;
+  *) echo "vibe-install: unknown tool: $TOOL (use claude-code|cursor|antigravity|aider|codex|generic)" >&2; exit 2 ;;
+esac
+
+# claude-code + --global means global install
+INSTALL_GLOBAL=0
+if [ "$TOOL" = "claude-code" ] && [ "$GLOBAL" -eq 1 ]; then
+  INSTALL_GLOBAL=1
+fi
+
+PACK_DIR="$KIT_ROOT/installers/$TOOL"
+if [ ! -d "$PACK_DIR" ]; then
+  echo "vibe-install: missing installer pack: $PACK_DIR" >&2
+  exit 2
+fi
+
+echo "vibe-install: tool=$TOOL root=$ROOT"
+[ "$INSTALL_GLOBAL" -eq 1 ] && echo "vibe-install: scope=global (~/.claude/)"
+if [ "$CHECK" -eq 1 ]; then echo "  (--check: no files written)"; fi
+
+# --- helpers ---
+log() { printf '  %s %s\n' "$1" "$2"; }
+copy_file() {
+  # copy_file <src> <dst>           — copy; report which action
+  # copy_file <src> <dst> --overwrite — overwrite if exists
+  local src="$1" dst="$2" overwrite=0
+  [ "${3:-}" = "--overwrite" ] && overwrite=1
+  if [ ! -e "$src" ]; then return 0; fi
+  if [ -e "$dst" ] && [ "$overwrite" -eq 0 ]; then
+    log "=" "${dst#"$ROOT"/} (exists, skipping)"
+    return 0
+  fi
+  if [ "$CHECK" -eq 0 ]; then
+    mkdir -p "$(dirname "$dst")"
+    cp "$src" "$dst"
+  fi
+  log "+" "${dst#"$ROOT"/}"
+}
+copy_tree() {
+  # copy_tree <srcdir> <dstdir>     — copy files; skip existing
+  local srcdir="$1" dstdir="$2"
+  [ -d "$srcdir" ] || return 0
+  while IFS= read -r -d '' src; do
+    local rel
+    rel="${src#"$srcdir"/}"
+    copy_file "$src" "$dstdir/$rel"
+  done < <(find "$srcdir" -type f -print0)
+}
+
+# --- per-tool install ---
+case "$TOOL" in
+  claude-code)
+    if [ "$INSTALL_GLOBAL" -eq 1 ]; then
+      DST="$HOME/.claude"
+      # 1. global rules
+      copy_tree "$KIT_ROOT/rules" "$DST/rules"
+      # 2. global slash commands
+      copy_tree "$KIT_ROOT/commands" "$DST/commands"
+      # 3. global master rules
+      copy_file "$KIT_ROOT/CLAUDE.md" "$DST/CLAUDE.md" --overwrite
+      # 4. global hooks + bin
+      mkdir -p "$HOME/.claude/vibe-kit/bin/hooks"
+      copy_tree "$KIT_ROOT/bin/hooks" "$HOME/.claude/vibe-kit/bin/hooks"
+      [ "$CHECK" -eq 0 ] && chmod +x "$HOME/.claude/vibe-kit/bin/hooks/"*.sh 2>/dev/null
+      copy_file "$KIT_ROOT/bin/vibe-init"         "$HOME/.claude/vibe-kit/bin/vibe-init" --overwrite
+      copy_file "$KIT_ROOT/bin/vibe-verify"       "$HOME/.claude/vibe-kit/bin/vibe-verify" --overwrite
+      copy_file "$KIT_ROOT/bin/vibe-detect-tool"  "$HOME/.claude/vibe-kit/bin/vibe-detect-tool" --overwrite
+      [ "$CHECK" -eq 0 ] && chmod +x "$HOME/.claude/vibe-kit/bin/"vibe-* 2>/dev/null
+      # 5. merge hooks into settings.json (preserve existing)
+      if [ -f "$KIT_ROOT/settings.json" ] && [ "$CHECK" -eq 0 ]; then
+        python3 - "$DST/settings.json" "$KIT_ROOT/settings.json" <<'PY'
+import json, sys, pathlib
+p = pathlib.Path(sys.argv[1])
+existing = json.loads(p.read_text()) if p.exists() else {}
+hooks = json.loads(pathlib.Path(sys.argv[2]).read_text())['hooks']
+existing.setdefault('hooks', {}).update(hooks)
+p.write_text(json.dumps(existing, indent=2))
+PY
+        log "+" "$DST/settings.json (merged hooks)"
+      fi
+      # 6. Skill bundle
+      mkdir -p "$HOME/.claude/skills/vibe-kit"
+      copy_file "$PACK_DIR/SKILL.md" "$HOME/.claude/skills/vibe-kit/SKILL.md"
+    else
+      # project-scoped claude-code install
+      DST="$ROOT/.claude"
+      copy_tree "$KIT_ROOT/rules" "$DST/rules"
+      copy_tree "$KIT_ROOT/commands" "$DST/commands"
+      copy_file "$PACK_DIR/AGENTS.md" "$DST/AGENTS.md" --overwrite
+    fi
+    ;;
+
+  cursor)
+    DST="$ROOT/.cursor"
+    copy_tree "$KIT_ROOT/rules" "$DST/rules"
+    copy_tree "$KIT_ROOT/commands" "$DST/commands"
+    copy_file "$PACK_DIR/.cursorrules" "$ROOT/.cursorrules"
+    copy_file "$PACK_DIR/README.md" "$DST/README.md"
+    ;;
+
+  antigravity)
+    DST="$ROOT/.claude"
+    copy_tree "$KIT_ROOT/rules" "$DST/rules"
+    copy_tree "$KIT_ROOT/commands" "$DST/commands"
+    copy_file "$PACK_DIR/CLAUDE.md" "$DST/AGENTS.md" --overwrite
+    copy_file "$PACK_DIR/README.md" "$DST/README.md"
+    ;;
+
+  aider)
+    copy_file "$PACK_DIR/.aider.conf.yml" "$ROOT/.aider.conf.yml"
+    copy_file "$PACK_DIR/CONVENTIONS.md" "$ROOT/CONVENTIONS.md" --overwrite
+    copy_file "$PACK_DIR/README.md" "$ROOT/.aider.md"
+    ;;
+
+  codex)
+    copy_file "$PACK_DIR/AGENTS.md" "$ROOT/AGENTS.md" --overwrite
+    copy_file "$PACK_DIR/README.md" "$ROOT/.codex.md"
+    ;;
+
+  generic)
+    copy_file "$PACK_DIR/AGENTS.md" "$ROOT/AGENTS.md" --overwrite
+    copy_file "$PACK_DIR/README.md" "$ROOT/.vibe-kit.md"
+    ;;
+esac
+
+# --- master rules → root AGENTS.md (all tools) ---
+copy_file "$KIT_ROOT/CLAUDE.md" "$ROOT/AGENTS.md" --overwrite
+
+# --- run vibe-init to scaffold docs/, .github/, .gitignore ---
+if [ "$INIT_ONLY" -eq 0 ] && [ "$CHECK" -eq 0 ]; then
+  echo
+  VIBE_INIT="$GLOBAL_BIN/vibe-init"
+  [ -x "$VIBE_INIT" ] || VIBE_INIT="$KIT_ROOT/bin/vibe-init"
+  [ -x "$VIBE_INIT" ] || VIBE_INIT="$SCRIPT_DIR/vibe-init"
+  if [ -x "$VIBE_INIT" ]; then
+    if [ "$UPDATE" -eq 1 ]; then
+      "$VIBE_INIT" --update --root "$ROOT" || true
+    else
+      "$VIBE_INIT" --root "$ROOT" || true
+    fi
+  else
+    echo "vibe-install: vibe-init not found; skipping scaffold" >&2
+  fi
+elif [ "$CHECK" -eq 1 ]; then
+  echo
+  echo "  (would run vibe-init to scaffold docs/, .github/, .gitignore)"
+fi
+
+# --- done ---
+echo
+echo "vibe-install: done."
+case "$TOOL" in
+  claude-code)
+    if [ "$INSTALL_GLOBAL" -eq 1 ]; then
+      echo "  next: restart Claude Code; rules + commands + hooks load automatically."
+    else
+      echo "  next: in this project, run /vibe-spec <feature-name> to start."
+    fi
+    ;;
+  cursor)
+    echo "  next: in Composer, run a /vibe-* command to start."
+    ;;
+  antigravity)
+    echo "  next: in Antigravity, run a /vibe-* command to start."
+    ;;
+  aider)
+    echo "  next: aider --read docs/requirements/<feature>/spec.md"
+    ;;
+  codex)
+    echo "  next: codex (AGENTS.md is auto-loaded as the master rules)."
+    ;;
+  generic)
+    echo "  next: chat AI in this project reads AGENTS.md automatically."
+    ;;
+esac
+
+[ "$TOOL" = "generic" ] && exit 1 || exit 0

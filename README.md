@@ -40,15 +40,19 @@
 
 ## Install
 
+The kit auto-detects which AI dev tool you use and installs the right config. Run from your project root:
+
 ```bash
 git clone https://github.com/Rushabh9033/vibe-kit
-# For Claude Code (preferred):
-cp -R skills/vibe-kit ~/.claude/skills/
-# Then in any Claude Code session:
-/skill vibe-kit
+# Install ~/.claude/vibe-kit/bin/ once (Claude Code only):
+./kit/bin/install-claude-code.sh
+# Then in any project:
+~/.claude/vibe-kit/bin/vibe-install
 ```
 
-For other tools (Cursor, Antigravity, Aider, etc.): `cd vibe-kit/kit && cat install/<your-tool>.md`. Pick yours from `install/`.
+`vibe-install` detects Claude Code / Cursor / Antigravity / Aider / Codex by env vars and cwd files, then drops the right rules + commands + conventions file into your project. It also runs `vibe-init` to scaffold `docs/`, `.github/`, and `.gitignore` — **skipping files that already exist**, so it's safe to run in a project that's already in development.
+
+Override detection with `--tool=cursor` (or `antigravity`, `aider`, `codex`, `claude-code`, `generic`). For tool-specific quirks (Cursor's `@-mentions`, Aider's command-flag aliases, Antigravity's auto-format), see `install/<your-tool>.md`.
 
 ---
 
@@ -77,13 +81,16 @@ vibe-kit/
 │   ├── 00-anchor.md         ← Discovery protocol + role
 │   ├── 01–07                ← spec, plan, ADR, edges, handoff, retro
 ├── kit/
-│   ├── bin/vibe-verify      ← AC↔code�tests contract checker (real script)
-│   ├── bin/vibe-init        ← scaffolds a project
-│   ├── bin/hooks/           ← format-on-edit, guard-unsafe, handoff
-│   ├── commands/            ← 8 slash commands (Claude Code)
-│   ├── rules/               ← 5 modular rules (security, verify, cost…)
-│   └── templates/           ← 10 project templates
-├── install/                 ← per-tool steps (Cursor, Aider, …)
+│   ├── bin/vibe-install        ← unified installer (auto-detects tool)
+│   ├── bin/vibe-detect-tool    ← auto-detect: claude-code|cursor|antigravity|aider|codex|generic
+│   ├── bin/vibe-verify         ← AC↔code↔tests contract checker
+│   ├── bin/vibe-init           ← scaffolds a project (skips existing files)
+│   ├── bin/hooks/              ← format-on-edit, guard-unsafe, handoff
+│   ├── commands/               ← 8 slash commands
+│   ├── rules/                  ← 5 modular rules (security, verify, cost…)
+│   ├── installers/             ← per-tool skill packs (claude-code, cursor, aider, antigravity, codex, generic)
+│   └── templates/              ← 10 project templates
+├── install/                    ← per-tool install guides + auto-detect matrix
 ├── skills/vibe-kit/         ← packaged Claude Code Skill
 ├── docs/                    ← playbook, architecture, gap-analysis
 └── examples/                ← intake, spec, plan, handoff samples

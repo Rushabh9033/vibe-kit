@@ -1,0 +1,55 @@
+# Vibe Coding Protocol — Aider config
+#
+# Auto-detection: vibe-install picks this pack when it sees .aider.conf.yml,
+# .aider.chat.history, or CONVENTIONS.md in the cwd, or AIDER_MODEL /
+# AIDER_CHAT_HISTORY in the env.
+#
+# Drop this whole file at your project root. Aider auto-loads it on every chat.
+
+# Read these into every chat's context
+read:
+  - CONVENTIONS.md
+  - AGENTS.md
+  - docs/SPEC.md
+  - CHANGELOG.md
+
+# Per-feature context — Aider can't glob specs, so pass --read at chat start
+# for the current feature being worked on.
+# Example:
+#   aider --read docs/requirements/profile-photo-upload/spec.md \
+#         --read docs/requirements/profile-photo-upload/plan.md
+
+# Map the kit's slash-command intent to Aider's command flags.
+# (Aider has no slash commands; use these in chat.)
+# vibe-spec:    /read docs/requirements/<feature>/spec.md
+# vibe-plan:    /read docs/requirements/<feature>/plan.md
+# vibe-verify:  /run kit/bin/vibe-verify
+# vibe-handoff: /run kit/bin/hooks/session-end-handoff.sh
+# vibe-ship:    /commit
+# vibe-decide:  /read docs/decisions/
+# vibe-init:    /run kit/bin/vibe-init
+
+# Pre-commit hook (Aider's /commit fires this)
+# Leave commented if you don't have pre-commit installed; set up via:
+#   pip install pre-commit && pre-commit install
+# pre-commit: kit/bin/hooks/pre-commit-verify.sh
+
+# Model — pick by ADR. Default below is a cost/quality sweet spot for code.
+model: claude-3-5-sonnet-20241022
+
+# Auto-commits on every chat turn. Off by default because vibe-kit wants
+# committed work to be /vibe-verify'd first.
+auto-commits: false
+
+# Auto-test runs after each edit. If you have a test runner, set it here.
+# auto-test: npm test
+# auto-test: pytest -q
+
+# Skip files matching these patterns (the kit's own config files shouldn't
+# be Aider's edit target unless explicitly named).
+ignore:
+  - vendor/
+  - node_modules/
+  - .venv/
+  - dist/
+  - build/
