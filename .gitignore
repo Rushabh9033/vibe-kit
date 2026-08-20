@@ -1,0 +1,40 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Node
+node_modules/
+.pnpm-store/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Go
+vendor/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Claude Code (local only — never commit)
+CLAUDE.local.md
+.vibe-cache/
+
+# Build outputs
+dist/
+build/
+target/
+*.log
+
+# Coverage / cache
+coverage/
+.cache/

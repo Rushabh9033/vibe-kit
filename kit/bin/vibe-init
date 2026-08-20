@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""
+vibe-init — bootstrap a project to Vibe Coding Protocol (VCP) standard.
+
+Usage:
+  vibe-init                 # initialize current directory
+  vibe-init --check         # report what would be created, do nothing
+  vibe-init --update        # refresh docs/ files (don't touch existing AGENTS.md/CLAUDE.md)
+"""
+import argparse
+import shutil
+import sys
+from datetime import date
+from pathlib import Path
+
+KIT = Path.home() / ".claude" / "vibe-kit"
+TEMPLATES = KIT / "templates"
+
+GITIGNORE_APPEND = "\n# Vibe Coding Protocol\n.env*\nCLAUDE.local.md\n.vibe-cache/\n"
+
+
+def detect_stack(cwd: Path) -> str:
+    if (cwd / "package.json").exists():
+        return "node"
+    if (cwd / "pyproject.toml").exists() or (cwd / "requirements.txt").exists():
+        return "python"
+    if (cwd / "go.mod").exists():
+        return "go"
+    if (cwd / "Cargo.toml").exists():
+        return "rust"
+    if (cwd / "Gemfile").exists():
+        return "ruby"
+    return "unknown"
+
+
+def render(name: str, stack: str) -> str:
+    today = date.today().isoformat()
+    if name == "HANDOFF.md":
+        return (
+            f"# Handoff\n\n"
+            f"<one-paragraph TL;DR of current state>\n\n"
+            f"**Branch:** `<branch>`\n"
+            f"**Last session:** `docs/handoffs/{today}-.md`\n"
+            f"**Active spec:** `docs/SPEC.md`\n"
+            f"**Next action:** <one sentence>\n"
+        )
+    if name == "CLAUDE.md":
+        return (
+            "@AGENTS.md\n\n"
+            "# Claude Code specifics\n"
+            "- Plan mode (Shift+Tab) for any non-trivial change in /auth, /billing, /security.\n"
+            "- `/vibe-verify` before claiming done on any user-visible feature.\n"
+            "- `/vibe-handoff` at end of any session that touched code.\n"
+            "- Hooks live: format-on-edit (PostToolUse), guard-unsafe (PreToolUse), session-end-handoff (Stop).\n"
+            f"- Slash commands global: `/vibe-init`, `/vibe-spec`, `/vibe-plan`, `/vibe-verify`, `/vibe-ship`, `/vibe-handoff`, `/vibe-decide`, `/vibe-review-pr`.\n"
+        )
+    if name == ".gitignore":
+        return GITIGNORE_APPEND.lstrip()
+    if name == "docs/SPEC.md":
+        return (
+            "# Product Spec\n\n"
+            "Status: draft\n"
+            "Owner: @<handle>\n"
+            f"Last updated: {today}\n"
+            "Milestone: <version>\n\n"
+            "## Problem\n<Who hurts. How much. Why now.>\n\n"
+            "## Goals\n- G1. ...\n\n"
+            "## Non-goals\n- NG1. ...\n\n"
+            "## NFRs\n| Category | Requirement | Target | Measurement |\n|---|---|---|---|\n\n"
+            "## MoSCoW scope (this milestone)\n- MUST: ...\n- SHOULD: ...\n- COULD: ...\n- WON'T (this milestone): ...\n"
+        )
+    if name == "docs/ARCHITECTURE.md":
+        return (
+            "# Architecture\n\n"
+            "<One screen: how the system is composed. Optional C4 container.>\n\n"
+            "## Components\n- <component>: <responsibility>\n\n"
+            "## Data flow\n1. <step>\n\n"
+            "## Tech choices\n- <tech>: <why — link to ADR>\n"
+        )
+    if name == "docs/requirements/README.md":
+        return (
+            "# Per-feature specs\n\n"
+            "Each feature: `docs/requirements/<feature-slug>/spec.md` (contract) + `plan.md` (phases).\n\n"
+            "Use `/vibe-spec` to scaffold from intake. Use `/vibe-plan` to phase the work.\n"
+        )
+    if name == "docs/decisions/README.md":
+        return (
+            "# Architecture Decision Records\n\n"
+            "Sequential `NNNN-<slug>.md`. Use `/vibe-decide`. Immutable once accepted; supersede with a new ADR.\n"
+        )
+    if name == "docs/handoffs/README.md":
+        return (
+            "# Session handoffs\n\n"
+            "One file per session. Append-only. `/vibe-handoff` writes one.\n"
+        )
+    if name == "docs/decisions/0001-record-architecture-decisions.md":
+        return (
+            "# 0001. Record architecture decisions\n\n"
+            "* Status: Accepted\n"
+            f"* Date: {today}\n\n"
+            "We use ADRs in `docs/decisions/`, Nygard/MADR format, sequentially numbered.\n"
+            "Use `/vibe-decide`.\n\n"
+            "Consequences:\n"
+            "* New irreversible choices get an ADR before or with the PR.\n"
+            "* Old ADRs are immutable; new ADRs supersede.\n"
+        )
+    if name == ".claude/settings.json":
+        return """{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {"type":"command","command":"~/.claude/vibe-kit/bin/hooks/post-edit-format.sh \\"$CLAUDE_FILE_PATHS\\""}
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {"type":"command","command":"~/.claude/vibe-kit/bin/hooks/guard-unsafe.sh"}
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type":"prompt",
+            "prompt":"If this session did nontrivial work, write a handoff to docs/handoffs/$(date +%Y-%m-%d)-$(git rev-parse --abbrev-ref HEAD | tr '/' '-').md using the template at ~/.claude/vibe-kit/templates/handoff.md. Update HANDOFF.md TL;DR. Append CHANGELOG.md [Unreleased] if user-visible change. Skip if docs/handoffs/ does not exist in the working directory."
+          }
+        ]
+      }
+    ]
+  }
+}
+"""
+    raise KeyError(name)
+
+
+# Files to create when not using a literal template
+GENERATED = {
+    "HANDOFF.md",
+    "CLAUDE.md",
+    ".gitignore",
+    "docs/SPEC.md",
+    "docs/ARCHITECTURE.md",
+    "docs/requirements/README.md",
+    "docs/decisions/README.md",
+    "docs/handoffs/README.md",
+    "docs/decisions/0001-record-architecture-decisions.md",
+    ".claude/settings.json",
+}
+
+# Files sourced directly from templates
+TEMPLATE_MAP = {
+    "AGENTS.md":                 "AGENTS.md",
+    "CHANGELOG.md":              "CHANGELOG.md",
+    "docs/gotchas.md":           "gotchas.md",
+    "docs/decisions/template.md":"ADR.md",
+    ".github/PULL_REQUEST_TEMPLATE.md": "PULL_REQUEST_TEMPLATE.md",
+}
+
+
+def bootstrap(cwd: Path, check: bool = False, update: bool = False) -> int:
+    stack = detect_stack(cwd)
+    print(f"vibe-init: stack={stack}; target={cwd}")
+
+    if check:
+        print("(--check: no files written)")
+
+    # Directories
+    for d in [
+        "docs/requirements",
+        "docs/decisions",
+        "docs/handoffs",
+        "docs/runbooks",
+        "docs/diagrams",
+        ".claude",
+        ".github",
+    ]:
+        target = cwd / d
+        if not target.exists():
+            print(f"  +  dir  {d}/")
+            if not check:
+                target.mkdir(parents=True, exist_ok=True)
+
+    # Generated files
+    for rel in GENERATED:
+        target = cwd / rel
+        if target.exists() and not update:
+            if rel == ".gitignore":
+                with target.open("a") as f:
+                    if not check:
+                        f.write(GITIGNORE_APPEND)
+                print(f"  +  {rel} (appended)")
+            else:
+                print(f"  =  {rel} (exists, skipping)")
+            continue
+        if check:
+            print(f"  +  {rel}")
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(render(rel, stack))
+        print(f"  +  {rel}")
+
+    # Templated files
+    for rel, src in TEMPLATE_MAP.items():
+        target = cwd / rel
+        if target.exists() and not update:
+            print(f"  =  {rel} (exists, skipping)")
+            continue
+        if check:
+            print(f"  +  {rel}")
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(TEMPLATES / src, target)
+        print(f"  +  {rel}")
+
+    print()
+    print("VCP initialized." if not check else "VCP would be initialized.")
+    print("Next: fill docs/SPEC.md for your current milestone, then /vibe-spec per feature.")
+    return 0
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(prog="vibe-init")
+    p.add_argument("--check", action="store_true", help="report only; write nothing")
+    p.add_argument("--update", action="store_true", help="refresh generated docs; don't touch AGENTS.md/CLAUDE.md/CHANGELOG.md/gotchas.md/PR template")
+    p.add_argument("--root", default=".", help="target directory (default: cwd)")
+    args = p.parse_args()
+    return bootstrap(Path(args.root).resolve(), check=args.check, update=args.update)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
