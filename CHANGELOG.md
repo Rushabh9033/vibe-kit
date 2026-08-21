@@ -5,6 +5,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Added — One-click install
+A single `curl | bash` command installs vibe-kit globally:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Rushabh9033/vibe-kit/main/install.sh | bash
+```
+
+The new `install.sh` script clones the repo (shallow, `--depth 1`), copies `kit/` into `~/.claude/vibe-kit/`, sets executable bits, and adds the install dir to your PATH (idempotently editing `~/.zshrc` / `~/.bashrc`). Flags: `--yes`, `--no-path-edit`, `--prefix=PATH`, `--ref=BRANCH`, `--uninstall`.
+
+Companion command `vibe-update` re-runs install.sh against the latest main — same flags.
+
+The README's Install section now puts the one-liner first; the manual `git clone` dance is documented as a fallback for users who can't `curl | bash`.
+
 ### Added — AI-assisted intake (--ai flag)
 `vibe-spec-intake` now supports an `--ai` flag to automatically generate intent-specific Acceptance Criteria, Constraints, Edge Cases, and Non-Goals using the `claude` CLI. It falls back to the template if the CLI is unavailable.
 

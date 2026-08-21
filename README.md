@@ -243,13 +243,39 @@ The milestone Spec decomposes into per-feature Specs. Each feature Spec is the i
 
 ## Install
 
+**One command.** No `git clone`. No PATH juggling.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Rushabh9033/vibe-kit/main/install.sh | bash
+```
+
+What it does:
+- Clones the kit to a temp dir, copies `kit/` into `~/.claude/vibe-kit/`.
+- Sets executable bits.
+- Adds `~/.claude/vibe-kit/bin` to your PATH (idempotently edits `~/.zshrc` / `~/.bashrc`).
+- Prints a summary with next-step commands.
+
+Flags: `--yes` (skip prompts), `--no-path-edit` (don't touch rcfile), `--prefix=PATH` (custom install root), `--uninstall`.
+
+Then in any project:
+
+```bash
+vibe-install                      # auto-detects Claude Code / Cursor / etc.
+vibe-install --tool=cursor        # override detection
+```
+
+Update later:
+
+```bash
+vibe-update                       # re-runs install.sh against latest main
+```
+
+Manual install (if you can't `curl | bash`):
+
 ```bash
 git clone https://github.com/Rushabh9033/vibe-kit
 cd vibe-kit
-./kit/bin/vibe-install           # one-time, auto-detects Claude Code / Cursor / etc.
-
-# Then in any project:
-~/.claude/vibe-kit/bin/vibe-install
+./kit/bin/vibe-install
 ```
 
 `vibe-install` detects Claude Code / Cursor / Antigravity / Aider / Codex by env vars and cwd files, then drops the right rules + commands + conventions file into your project. It also runs `vibe-init` to scaffold `docs/`, `.github/`, `.gitignore` — **skipping files that already exist**, so it's safe to run in a project that's already in development.

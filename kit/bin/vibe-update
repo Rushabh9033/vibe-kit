@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# vibe-update — re-run install.sh with current defaults.
+#
+# Idempotent. Same flags as install.sh. Resolves install.sh from either:
+#   - the kit repo's install.sh (if vibe-update is running from a clone)
+#   - the installed ~/.claude/vibe-kit/install.sh (after one-click)
+#   - the GitHub raw URL (last resort)
+#
+# Usage:
+#   vibe-update                # update to current main
+#   vibe-update --ref=v0.3     # update to a specific ref
+#   vibe-update --yes          # skip confirmations
+#   vibe-update --prefix=...   # custom prefix
+
+set -uo pipefail
+
+# Where is vibe-update itself? Walk back from the bin dir.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Find install.sh in order:
+#   1. Sibling of bin in the same install prefix
+#   2. Repo root (if SCRIPT_DIR is kit/bin, ../..)
+#   3. Fallback: curl from GitHub
+INSTALL_SH=""
+for candidate in \
+    "$SCRIPT_DIR/../install.sh" \
+    "$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd)/install.sh"; do
+  if [ -f "$candidate" ]; then
+    INSTALL_SH="$candidate"
+    break
+  fi
+done
+
+PREFIX_DEFAULT="${VIBE_KIT_PREFIX:-$HOME/.claude/vibe-kit}"
+
+if [ -z "$INSTALL_SH" ]; then
+  # Fetch from GitHub into a temp file and exec it.
+  TMP="$(mktemp -t vibe-update.XXXXXX)"
+  trap 'rm -f "$TMP"' EXIT
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "https://raw.githubusercontent.com/Rushabh9033/vibe-kit/main/install.sh" -o "$TMP" || {
+      echo "vibe-update: could not fetch install.sh from GitHub" >&2
+      exit 1
+    }
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q "https://raw.githubusercontent.com/Rushabh9033/vibe-kit/main/install.sh" -O "$TMP" || {
+      echo "vibe-update: could not fetch install.sh from GitHub" >&2
+      exit 1
+    }
+  else
+    echo "vibe-update: curl or wget required for first-time update" >&2
+    exit 1
+  fi
+  INSTALL_SH="$TMP"
+fi
+
+echo "vibe-update: re-running install..."
+exec bash "$INSTALL_SH" --yes "$@"
