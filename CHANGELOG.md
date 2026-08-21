@@ -18,6 +18,14 @@ Companion command `vibe-update` re-runs install.sh against the latest main — s
 
 The README's Install section now puts the one-liner first; the manual `git clone` dance is documented as a fallback for users who can't `curl | bash`.
 
+#### Fixed — Non-interactive shells auto-edit rcfile
+The previous `install.sh` refused to edit `~/.zshrc` without `--yes` even when stdin was not a TTY (the `curl ... | bash` case). That defeated the whole point of one-click. New behavior:
+- TTY + no `--yes` → prompt
+- Non-TTY (curl|bash, CI) → auto-edit (the user consented by running the one-liner)
+- `--no-path-edit` → still never touches rcfile
+
+Test coverage added: 2 assertions in `tests/weapons/test-install-oneclick.sh` lock in the non-interactive auto-edit path.
+
 ### Added — AI-assisted intake (--ai flag)
 `vibe-spec-intake` now supports an `--ai` flag to automatically generate intent-specific Acceptance Criteria, Constraints, Edge Cases, and Non-Goals using the `claude` CLI. It falls back to the template if the CLI is unavailable.
 
