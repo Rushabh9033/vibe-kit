@@ -174,6 +174,15 @@ bash "$INSTALL_SH" --prefix="$PREFIX3" --yes --no-path-edit >/dev/null 2>&1
 [ ! -e "$RC3" ] && ok "--no-path-edit: rcfile untouched" || fail "--no-path-edit created rcfile"
 [ -d "$PREFIX3/bin" ] && ok "--no-path-edit still installs files" || fail "--no-path-edit skipped install"
 
+# Non-interactive (curl|bash) should auto-edit rcfile without prompting.
+PREFIX_NI="$TMPDIR_BASE/install-ni"
+RC_NI="$HOME/.zshrc.ni"
+[ -f "$RC_NI" ] && rm "$RC_NI"
+# Run with stdin redirected (not a TTY) and no --yes flag.
+bash "$INSTALL_SH" --prefix="$PREFIX_NI" --rcfile="$RC_NI" </dev/null >/dev/null 2>&1
+[ -f "$RC_NI" ] && ok "non-interactive (curl|bash) auto-edits rcfile" || fail "non-interactive didn't edit rcfile — curl|bash UX broken"
+grep -qF "# vibe-kit PATH" "$RC_NI" && ok "non-interactive: marker present" || fail "non-interactive: marker missing"
+
 # ---------- [6] --uninstall ----------
 
 hdr "[6] --uninstall"

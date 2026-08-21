@@ -176,25 +176,30 @@ if [ "$PATH_EDIT" -eq 1 ]; then
 
     # Idempotent: only append if the marker isn't already present.
     if ! grep -qF "$marker" "$rcfile" 2>/dev/null; then
-      if [ "$YES" -ne 1 ]; then
+      # Decide whether to prompt. The contract:
+      #   - --no-path-edit always skips (handled above)
+      #   - TTY (interactive shell) prompts unless --yes
+      #   - Non-TTY (curl|bash, CI) writes without prompting — that's
+      #     the whole point of one-click. A user piping curl to bash
+      #     has already consented by running the one-liner.
+      if [ "$YES" -ne 1 ] && [ -t 0 ]; then
         printf 'vibe-install: append to %s? [y/N] ' "$rcfile"
-        if [ -t 0 ]; then
-          read -r ans
-          case "$ans" in
-            y|Y|yes|YES) ;;
-            *) warn "PATH not edited (rcfile untouched). Add manually: $bin_line"; rcfile="" ;;
-          esac
-        else
-          warn "non-interactive shell; use --yes to auto-edit rcfile"
-          rcfile=""
-        fi
+        read -r ans
+        case "$ans" in
+          y|Y|yes|YES) ;;
+          *) warn "PATH not edited (rcfile untouched). Add manually: $bin_line"; rcfile="" ;;
+        esac
       fi
 
       if [ -n "$rcfile" ]; then
         {
           printf '\n%s\n%s\n' "$marker" "$bin_line"
         } >> "$rcfile"
-        say "PATH edited in $rcfile"
+        if [ "$YES" -ne 1 ] && [ ! -t 0 ]; then
+          say "PATH edited in $rcfile (non-interactive auto-edit; pass --no-path-edit to skip)"
+        else
+          say "PATH edited in $rcfile"
+        fi
       fi
     else
       say "PATH already edited in $rcfile (skipping)"
