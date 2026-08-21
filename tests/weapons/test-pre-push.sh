@@ -43,12 +43,16 @@ FAKE_EOF
 }
 
 # Run the hook in a temp dir, capture rc + output.
+# HOME is redirected to an empty sandbox dir so the hook's fallback path
+# (`$HOME/.claude/vibe-kit/bin/vibe-claim-check`) is not satisfied by a
+# real install on this machine. Without this, CASE 6 (missing claim-check)
+# would silently find the real global install and the test would flake.
 run_hook() {
   local cwd="$1"
   shift
   (
     cd "$cwd"
-    bash "$HOOK" "$@" > /tmp/.prepush-out 2>&1
+    HOME="$TMPDIR_BASE/empty-home" bash "$HOOK" "$@" > /tmp/.prepush-out 2>&1
     echo $? > /tmp/.prepush-rc
   )
   RC=$(cat /tmp/.prepush-rc)
