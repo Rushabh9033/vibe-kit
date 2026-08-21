@@ -26,6 +26,9 @@ The previous `install.sh` refused to edit `~/.zshrc` without `--yes` even when s
 
 Test coverage added: 2 assertions in `tests/weapons/test-install-oneclick.sh` lock in the non-interactive auto-edit path.
 
+### Added — `AGENTS.md` for instant AI-agent install discovery
+The repo now ships an `AGENTS.md` at the root. AI coding tools (Claude Code, Cursor, Codex, Aider, Continue) read this file first when they enter a repo. Contents: one-line what-it-is, the curl|bash install one-liner, PATH activation steps, project wire-in, and `vibe-update`. `install.sh` copies `AGENTS.md` to `~/.claude/vibe-kit/` alongside `CLAUDE.md`.
+
 ### Added — AI-assisted intake (--ai flag)
 `vibe-spec-intake` now supports an `--ai` flag to automatically generate intent-specific Acceptance Criteria, Constraints, Edge Cases, and Non-Goals using the `claude` CLI. It falls back to the template if the CLI is unavailable.
 
