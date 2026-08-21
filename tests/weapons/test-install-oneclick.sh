@@ -69,6 +69,11 @@ INNER
   cat > "$dest/kit/CLAUDE.md" <<'INNER'
 # Master kit rules (test stub)
 INNER
+  cat > "$dest/AGENTS.md" <<'INNER'
+# AGENTS.md (test stub)
+curl -fsSL https://raw.githubusercontent.com/Rushabh9033/vibe-kit/main/install.sh | bash
+vibe-install
+INNER
   cat > "$dest/kit/prompts/spec-intake.md" <<'INNER'
 # fake prompt
 INNER
@@ -213,6 +218,14 @@ grep -qF "install.sh" "$KIT_ROOT/CHANGELOG.md" && ok "CHANGELOG mentions install
 
 # Spec exists.
 [ -f "$KIT_ROOT/docs/requirements/vibe-install-oneclick/spec.md" ] && ok "spec exists" || fail "spec missing"
+
+# AGENTS.md exists at repo root so AI agents can discover install instantly.
+[ -f "$KIT_ROOT/AGENTS.md" ] && ok "AGENTS.md exists at repo root" || fail "AGENTS.md missing — AI agents won't know how to install"
+grep -qF "raw.githubusercontent.com/Rushabh9033/vibe-kit/main/install.sh" "$KIT_ROOT/AGENTS.md" && ok "AGENTS.md has the install one-liner" || fail "AGENTS.md missing install one-liner"
+grep -qF "vibe-install" "$KIT_ROOT/AGENTS.md" && ok "AGENTS.md references vibe-install" || fail "AGENTS.md missing vibe-install"
+
+# AGENTS.md should ship with the install.
+[ -f "$PREFIX1/AGENTS.md" ] && ok "AGENTS.md copied to install prefix" || fail "AGENTS.md not copied"
 
 # ---------- summary ----------
 

@@ -135,6 +135,13 @@ if [ -f "$REPO_DIR/kit/CLAUDE.md" ]; then
   cp "$REPO_DIR/kit/CLAUDE.md" "$PREFIX/CLAUDE.md"
 fi
 
+# AGENTS.md → root of install prefix. AI agents (Cursor, Codex, Aider,
+# Claude Code) look for this at the project root to learn how to set up.
+# Don't overwrite if user customized it.
+if [ -f "$REPO_DIR/AGENTS.md" ]; then
+  cp "$REPO_DIR/AGENTS.md" "$PREFIX/AGENTS.md"
+fi
+
 # Set executable bits.
 if [ -d "$PREFIX/bin" ]; then
   find "$PREFIX/bin" -type f \( -name "vibe-*" -o -name "*.sh" \) -exec chmod +x {} +
