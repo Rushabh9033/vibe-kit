@@ -1,11 +1,17 @@
 # vibe-kit
 
-**by Rushabh Mavani** — a spec-first workflow for AI-assisted software development.
+**by Rushabh Mavani.**
 
-> **If this is a 3-line bug fix, you don't need vibe-kit.**
-> If you've ever said *"the AI built what I asked for, but not what I meant"*, this kit exists for you.
+AI coding tools are amazing. They knock out a CRUD endpoint in 30 seconds. They also swing wildly past your requirements, sign the wrong things, and ship 12% of your events to `/dev/null`.
+
+If you've ever said *"the AI built what I asked for, but not what I meant"* — yeah. This kit is for you.
+
+> If this is a 3-line bug fix, you don't need vibe-kit. Go fix your bug.
+> If you've ever opened a PR and realized the AI quietly dropped half the requirements — keep reading.
 
 ## The pain
+
+You know this one:
 
 ```
 You:  "Send a webhook when an order ships."
@@ -17,9 +23,11 @@ You:  ship it. A customer reports they missed 12% of shipping events.
       Rebuild it properly. Then backfill the missed ones.
 ```
 
-The failure isn't the AI. The failure is that **intent was never made specific**.
-vibe-kit forces you to write a Spec before the code exists, then makes the
-ship boundary check the code against the Spec.
+The AI did what you asked. It did NOT do what you meant. The product spec lived in your head for 30 seconds, and now it's gone.
+
+This isn't an AI problem. This is a "you didn't write down what you actually wanted" problem. vibe-kit fixes that by making you write a Spec before the code starts, and then making the ship boundary check the code against the Spec.
+
+You find out at PR time. Not at 3am.
 
 ## The workflow
 
@@ -27,95 +35,83 @@ ship boundary check the code against the Spec.
 Spec  →  Code  →  Verify  →  Ship
 ```
 
-That's it. Four steps. The Spec is where you decide; the Code is where
-the AI executes; Verify is where you find out whether the AI executed
-against the Spec; Ship is the boundary that holds.
+Four steps. We tried three. We tried two. We keep coming back to four.
 
-For larger work, supporting workflows exist (Plan, Decide, Handoff).
-You don't have to learn them. Use them when the work earns them.
+- **Spec** — you write down what you want. Acceptance criteria, edge cases, what this thing is NOT.
+- **Code** — the AI writes it. Or you do. Or both. The Spec is the contract.
+- **Verify** — checks the diff against the Spec. Catches missing tests, missing implementations, missing constraints.
+- **Ship** — the part that holds. If Verify says no, you don't push.
+
+For larger work, supporting workflows exist (Plan, Decide, Handoff). Use them when the work earns them. Not before.
 
 ### Spec-first. Planner optional.
 
-The Spec is mandatory. The Planner is not — it is one of two entry
-points to producing the Spec:
+The Spec is mandatory. The Planner is optional.
 
-- **Planner entry**: open a chat AI (Claude.ai, ChatGPT, Gemini), run
-  `prompts/00-anchor.md` → Discovery → write `docs/requirements/<feature>/spec.md`.
-- **Coder entry**: open your dev tool (Claude Code, Cursor, etc.); at
-  task start, the spec-first gate (`kit/templates/spec-first-gate.md`)
-  runs. If no applicable Spec exists for non-trivial work, the Coder
-  runs Discovery itself, writes the Spec, and **stops for your approval**
-  before any code is touched.
+You can write the Spec with a chat AI (Claude.ai, ChatGPT, Gemini) — that's the "Planner" mode. It asks you questions, surfaces the ambiguity, writes the Spec.
 
-Either path produces the same Spec. The ship gate (`vibe-verify` +
-`/vibe-ship`) doesn't care which path produced it. The Planner is
-useful when the planning model has a longer context window than the
-coding tool, or when the user is not the coder. The Coder-as-discoverer
-is useful when you want one tool, one session.
+Or you can just open your dev tool (Claude Code, Cursor, etc.) and tell the AI what you want. At task start, the kit runs a "spec-first gate": if no Spec exists for non-trivial work, the Coder runs Discovery itself, writes the Spec, and **stops for your approval** before any code.
+
+Either way you end up with a Spec. Either way, you approve it before code happens. The Planner is useful when the planning model has more context than the coding tool, or when you're not the coder. The Coder-as-discoverer is useful when you want one tool, one session.
 
 ```
    Human intent (vague, one line)
         ↓
    ┌──────────────┐
-   │  Spec        │  ← durable markdown; the source of product intent
+   │  Spec        │  ← durable markdown. The source of product intent.
    │  Goal · ACs  │
    │  Constraints │
    └──────┬───────┘
           │
    ┌──────▼───────┐
-   │  Code        │  ← AI / human / both; against the Spec
+   │  Code        │  ← AI / human / both. Against the Spec.
    │  + tests     │
    └──────┬───────┘
           │
    ┌──────▼───────┐
-   │  Verify      │  ← /vibe-verify; checks the diff against the Spec
-   │  PASS / FAIL │  ← exits 0 / 1 — a real gate
-   │  BLOCK       │  ← exits 2 — needs human review; override with VIBE_SHIP_OVERRIDE
-   └──────┬───────�
+   │  Verify      │  ← /vibe-verify. Checks the diff against the Spec.
+   │  PASS / FAIL │  ← exits 0 / 1. A real gate.
+   │  BLOCK       │  ← exits 2. Needs human review.
+   └──────┬───────┘
           │
    ┌──────▼───────┐
-   │  Ship        │  ← /vibe-ship + pre-push hook (opt-in)
+   │  Ship        │  ← /vibe-ship + pre-push hook (opt-in).
    └──────────────┘
 ```
 
-**See it in action**: [`examples/todo-cli/`](examples/todo-cli/) is a runnable demo.
-Spec, implementation, verify output, a deliberate ship-blocker, and the fix.
+**See it in action**: [`examples/todo-cli/`](examples/todo-cli/) is a runnable demo. Spec, implementation, verify output, a deliberate ship-blocker, and the fix.
 
 ## What this kit does NOT do
 
-- It does **not** make the Spec self-enforce. The Spec is markdown; markdown cannot block a push on its own. Enforcement comes from the **verify + ship** boundary (see below).
-- It does **not** prove the code is correct. `vibe-verify` is an evidence/tripwire system: it catches missing tests, missing implementations, and constraint violations. It cannot prove a test exercises the AC. Use mutation testing (rank 4) for that.
-- It does **not** require a separate Planner session. The Coder can run Discovery itself when no Spec exists. The user is the human-approval gate between Spec and code — they decide when the Spec is ready to implement.
-- It does **not** own your repository. The pre-push hook is opt-in. `git push --no-verify` and `VIBE_SHIP_OVERRIDE=1` are escape hatches, documented.
+Let's set expectations:
+
+- It does **not** read your mind. The Spec is markdown, and markdown cannot block a push on its own. Enforcement comes from the **verify + ship** boundary.
+- It does **not** prove the code is correct. `vibe-verify` is an evidence/tripwire system, not a proof. It catches missing tests, missing implementations, and constraint violations. It cannot prove a test actually exercises the AC. For that, mutation testing exists.
+- It does **not** require a separate Planner session. The Coder can run Discovery itself. You are the human-approval gate — you decide when the Spec is ready.
+- It does **not** own your repository. The pre-push hook is opt-in. `git push --no-verify` and `VIBE_SHIP_OVERRIDE=1` are documented escape hatches.
 
 ## Ceremony scales with the work
 
-The kit recommends the workflow based on the diff — you don't pick. Run:
+You don't pick the workflow. The kit does. Based on the diff:
 
 ```bash
 vibe-classify                # tiny | normal | large | critical
 ```
 
-It looks at: diff size, files touched, and whether the diff touches
-sensitive paths (`/auth/`, `/billing/`, `/secrets/`, etc.). Conservative
-defaults — when in doubt it recommends the heavier ceremony.
+It looks at diff size, files touched, and whether the diff touches sensitive paths (`/auth/`, `/billing/`, `/secrets/`, etc.). Conservative defaults. When in doubt, it picks the heavier ceremony.
 
-| Level | When (auto-detected) | Pipeline |
+| Level | When | What you do |
 |---|---|---|
-| **tiny** | < 3 files, < 30 lines, no sensitive paths | edit → commit (skip the kit) |
-| **normal** | typical feature change | spec.md (lite) → code → /vibe-verify → /vibe-ship |
-| **large** | ≥ 15 files or ≥ 500 lines, or schema/architecture | full spec → /vibe-plan → code → /vibe-verify → /vibe-ship |
-| **critical** | auth / billing / secrets / destructive migrations | full spec + /vibe-decide (mandatory) + mutation testing + 2 reviewers |
+| **tiny** | < 3 files, < 30 lines, no sensitive paths | Edit → commit. Skip the kit. |
+| **normal** | Typical feature change | spec (lite) → code → /vibe-verify → /vibe-ship |
+| **large** | ≥ 15 files or ≥ 500 lines, or schema changes | Full spec → /vibe-plan → code → /vibe-verify → /vibe-ship |
+| **critical** | auth / billing / secrets / destructive migrations | Full spec + /vibe-decide (mandatory) + mutation testing + 2 reviewers |
 
-The Mandatory 11 edge-case thinking is **valuable**. It's a checklist for
-your brain, not a section to fill in on every change. Use it for Normal
-and above. Skip it for Tiny.
+The Mandatory 11 edge-case thinking is a checklist for your brain, not a section to fill in on every change. Use it for Normal and above. Skip it for Tiny.
 
 ## The Spec — what it is, and what it isn't
 
-The Spec is **markdown**. It's durable (lives in git), human-readable,
-and tool-agnostic. It captures product intent at a level that survives
-context loss.
+Markdown. Lives in git. Human-readable. Tool-agnostic. Survives context loss.
 
 What it has:
 - Goal (one paragraph)
@@ -131,12 +127,12 @@ What it doesn't have:
 - Marketing language
 
 Template: [`kit/templates/requirements-spec.md`](kit/templates/requirements-spec.md).
-Two Specs exist at different levels — see [Templates](#templates).
+
+Two Specs exist at different levels — see Templates below.
 
 ## Verify — the actual gate
 
-`vibe-verify` extracts ACs from `docs/requirements/<feature>/spec.md`
-and checks the git diff against each. Honest status model:
+`vibe-verify` extracts ACs from your Spec and checks the git diff against each. Honest status model:
 
 | Status | Meaning | Exit code |
 |---|---|---|
@@ -145,33 +141,29 @@ and checks the git diff against each. Honest status model:
 | **BLOCK** | PARTIAL or UNVERIFIED — needs human review | 2 |
 | (config error) | bad spec path, no git, etc. | 3 |
 
-**`VIBE_SHIP_OVERRIDE=1`** lifts BLOCK (2 → 0). It cannot lift FAIL.
+`VIBE_SHIP_OVERRIDE=1` lifts BLOCK (2 → 0). It cannot lift FAIL. FAIL is a real no.
 
-A pre-push hook is shipped (opt-in):
+A pre-push hook ships (opt-in):
 
 ```bash
 cp kit/bin/hooks/vibe-pre-push .git/hooks/pre-push
-chmod +x .git/hooks/pre-push
+chmod +x .git/hooks/vibe-pre-push
 ```
 
-After install, every `git push` runs `vibe-verify` first. Exit non-zero
-refuses the push. `git push --no-verify` skips it (documented escape hatch).
+After install, every `git push` runs `vibe-verify` first. Exit non-zero refuses the push. `git push --no-verify` skips it (documented escape hatch).
 
 ## Templates
 
-Two Specs at different lifecycle stages — they are NOT redundant:
+Two Specs at different lifecycle stages — they're NOT redundant:
 
 | Template | Lifecycle | Scope |
 |---|---|---|
 | `kit/templates/SPEC.md` | Milestone | Why this milestone; goals (SMART); MoSCoW; success metrics; non-functional requirements |
 | `kit/templates/requirements-spec.md` | Per-feature | Goal, ACs, Constraints, Edge Cases, Non-Goals, Verification for ONE feature |
 
-The milestone Spec decomposes into per-feature Specs. Each feature Spec
-is the input to its Coder session. Each feature AC is one test.
+The milestone Spec decomposes into per-feature Specs. Each feature Spec is the input to its Coder session. Each feature AC is one test.
 
 ## Install
-
-The kit auto-detects which AI dev tool you use and installs the right config:
 
 ```bash
 git clone https://github.com/Rushabh9033/vibe-kit
@@ -182,15 +174,9 @@ cd vibe-kit
 ~/.claude/vibe-kit/bin/vibe-install
 ```
 
-`vibe-install` detects Claude Code / Cursor / Antigravity / Aider / Codex
-by env vars and cwd files, then drops the right rules + commands +
-conventions file into your project. It also runs `vibe-init` to scaffold
-`docs/`, `.github/`, and `.gitignore` — **skipping files that already
-exist**, so it's safe to run in a project that's already in development.
+`vibe-install` detects Claude Code / Cursor / Antigravity / Aider / Codex by env vars and cwd files, then drops the right rules + commands + conventions file into your project. It also runs `vibe-init` to scaffold `docs/`, `.github/`, `.gitignore` — **skipping files that already exist**, so it's safe to run in a project that's already in development.
 
-Override detection with `--tool=cursor` (or `antigravity`, `aider`,
-`codex`, `claude-code`, `generic`). For tool-specific quirks, see
-`install/<your-tool>.md`.
+Override detection with `--tool=cursor` (or `antigravity`, `aider`, `codex`, `claude-code`, `generic`). For tool-specific quirks, see `install/<your-tool>.md`.
 
 ## What's in the box
 
@@ -226,19 +212,13 @@ vibe-kit/
 | **Planner** *(optional)* | Interviews you, surfaces ambiguity, writes the Spec | Any chat AI (Claude.ai, ChatGPT, Gemini). No file access needed. |
 | **Coder** | Reads the Spec, writes code and tests. **Also runs Discovery itself when no Spec exists** for non-trivial work. | Any dev tool with file access (Claude Code, Cursor, Aider, Antigravity, Codex). |
 
-The user is the human-approval gate. They flip `Status: awaiting-approval`
-→ `Status: in-progress` when the Spec is ready to implement. Either
-entry point can produce the Spec; the Coder's gate stops for approval
-regardless of who wrote it.
+You are the human-approval gate. You flip `Status: awaiting-approval` → `Status: in-progress` when the Spec is ready to implement. Either entry point can produce the Spec; the Coder's gate stops for approval regardless of who wrote it.
 
 ## Principle
 
 > **Specify small. Verify twice. Persist the lessons.**
 
-The Spec is the durable source of intent. Implementation, tests, ADRs,
-and handoffs are derived or changed artifacts. When in doubt, the Spec
-wins — but markdown doesn't enforce that. The **verify + ship**
-boundary does.
+The Spec is the durable source of intent. Implementation, tests, ADRs, and handoffs are derived or changed artifacts. When in doubt, the Spec wins — but markdown doesn't enforce that. The **verify + ship** boundary does.
 
 ## License
 
