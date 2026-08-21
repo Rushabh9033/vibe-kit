@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# vibe-arm — the ultimate weapon.
+#
+# Turns on the full hard-gate suite for a project:
+#   - vibe-edit-gate     (blocks Edit unless AC declared)
+#   - vibe-tdd-gate      (blocks src/ edit unless test file edited this session)
+#   - vibe-fix-detector  (blocks edits that touch recent fix: files)
+#   - vibe-ac-progress   (telemetry — AC done/total surfaced)
+#   - vibe-bug-mirror    (Stop hook — fix% surfaced)
+#   - vibe-claim-check   (per-AC evidence at ship time)
+#
+# `vibe-disarm` reverts.
+#
+# What it does:
+#   1. Writes `.vibe-cache/armed` in the project root (the marker).
+#   2. Wires the PreToolUse/PostToolUse/Stop hooks into `.claude/settings.json`
+#      (preserves existing hooks; doesn't touch anything else).
+#   3. Reports what was armed.
+#
+# Idempotent. Running twice is a no-op.
+
+set -uo pipefail
+
+die() { echo "vibe-arm: $*" >&2; exit 4; }
+
+ACTION="arm"
+[ "${1:-}" = "--disarm" ] || [ "${1:-}" = "disarm" ] && ACTION="disarm"
+[ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ] && {
+  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+  exit 0
+}
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$PROJECT_ROOT" 2>/dev/null || die "no project root"
+
+CACHE="$PROJECT_ROOT/.vibe-cache"
+SETTINGS="$PROJECT_ROOT/.claude/settings.json"
+
+if [ "$ACTION" = "disarm" ]; then
+  rm -f "$CACHE/armed"
+  # Strip the vibe-* hook entries we added (best-effort: match by command path).
+  if [ -f "$SETTINGS" ] && command -v python3 >/dev/null 2>&1; then
+    python3 - "$SETTINGS" <<'PY'
+import json, sys, pathlib
+p = pathlib.Path(sys.argv[1])
+try:
+    d = json.loads(p.read_text())
+except Exception:
+    sys.exit(0)
+hooks = d.get("hooks", {})
+for event in ("PreToolUse", "PostToolUse", "Stop"):
+    entries = hooks.get(event, [])
+    hooks[event] = [e for e in entries
+                    if not any("vibe-" in (h.get("command") or "")
+                               for h in e.get("hooks", []))]
+d["hooks"] = hooks
+p.write_text(json.dumps(d, indent=2))
+PY
+  fi
+  echo "vibe-arm: disarmed. Gating reverted."
+  exit 0
+fi
+
+# Arm.
+mkdir -p "$CACHE"
+touch "$CACHE/armed"
+
+# Find the kit's bin/hooks directory — either the dev checkout or the
+# installed location.
+KIT_BIN_DEFAULT="$HOME/.claude/vibe-kit/bin/hooks"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+KIT_HOOKS=""
+if [ -d "$SCRIPT_DIR/hooks" ]; then
+  KIT_HOOKS="$SCRIPT_DIR/hooks"
+elif [ -d "$KIT_BIN_DEFAULT" ]; then
+  KIT_HOOKS="$KIT_BIN_DEFAULT"
+else
+  die "cannot locate kit hooks directory"
+fi
+
+# Build the hook entries.
+HOOK_ENTRIES=$(cat <<EOF
+{
+  "PreToolUse": [
+    {
+      "matcher": "Edit|Write|MultiEdit",
+      "hooks": [
+        {"type": "command", "command": "$KIT_HOOKS/vibe-edit-gate.sh"},
+        {"type": "command", "command": "$KIT_HOOKS/vibe-tdd-gate.sh"},
+        {"type": "command", "command": "$KIT_HOOKS/vibe-fix-detector.sh"}
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "Edit|Write|MultiEdit",
+      "hooks": [
+        {"type": "command", "command": "$KIT_HOOKS/vibe-ac-progress.sh"}
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "hooks": [
+        {"type": "command", "command": "$KIT_HOOKS/vibe-bug-mirror.sh"}
+      ]
+    }
+  ]
+}
+EOF
+)
+
+# Merge into .claude/settings.json. Don't disturb existing hooks.
+mkdir -p "$(dirname "$SETTINGS")"
+if [ -f "$SETTINGS" ]; then
+  python3 - "$SETTINGS" "$HOOK_ENTRIES" <<'PY'
+import json, sys, pathlib
+
+def is_vibe_hook(e):
+    return any("vibe-" in (h.get("command") or "") for h in e.get("hooks", []))
+
+p = pathlib.Path(sys.argv[1])
+new_hooks = json.loads(sys.argv[2])
+try:
+    existing = json.loads(p.read_text())
+except Exception:
+    existing = {}
+existing_hooks = existing.setdefault("hooks", {})
+for event, entries in new_hooks.items():
+    bucket = existing_hooks.setdefault(event, [])
+    # Drop any prior vibe-* entries — arm is idempotent.
+    bucket[:] = [e for e in bucket if not is_vibe_hook(e)]
+    bucket.extend(entries)
+existing["hooks"] = existing_hooks
+p.write_text(json.dumps(existing, indent=2))
+PY
+else
+  printf '%s\n' "{ \"hooks\": $HOOK_ENTRIES }" | python3 -c '
+import json, sys
+d = json.loads(sys.stdin.read())
+print(json.dumps(d, indent=2))
+' > "$SETTINGS"
+fi
+
+echo "vibe-arm: ARMED. The kit will now block edits that violate the gates."
+echo
+echo "  Hard gates (block on violation):"
+echo "    • Edit/Write without an active AC declared          → vibe-edit-gate"
+echo "    • Edit on src/ without a corresponding test edited  → vibe-tdd-gate"
+echo "    • Edit on files touched by recent fix: commits      → vibe-fix-detector"
+echo
+echo "  Telemetry (informational):"
+echo "    • After every Edit, [vibe-ac] <done>/<total> ACs     → vibe-ac-progress"
+echo "    • At session end, fix-vs-build breakdown             → vibe-bug-mirror"
+echo "    • /vibe-claim-check forces per-AC evidence           → vibe-claim-check"
+echo
+echo "  To revert: vibe-disarm"
+echo "  Spec intake: vibe-spec-intake <slug> \"<1-line intent>\""

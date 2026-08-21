@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# vibe-spec-intake — Weapon 1.
+#
+# Socratic decomposition of a one-line intent into atomic Acceptance Criteria.
+# Reads a feature slug + 1-line intent, asks the developer to confirm/refine
+# each proposed AC, then writes `docs/requirements/<slug>/spec.md` with
+# Status: awaiting-approval.
+#
+# Two modes:
+#   --interactive (default for humans): walks the developer through each AC.
+#   --auto (for /vibe-spec or scripts): generates ACs from a template, no Q&A.
+#
+# Usage:
+#   vibe-spec-intake <slug> "<1-line intent>"
+#   vibe-spec-intake --auto <slug> "<1-line intent>"
+#   cat intent.txt | vibe-spec-intake --stdin <slug>
+#
+# Output: a markdown spec with Goal, ACs (atomic, one test each), Constraints,
+#         Non-Goals, Edge Cases. Status: awaiting-approval.
+
+set -uo pipefail
+
+die() { echo "vibe-spec-intake: $*" >&2; exit 4; }
+
+SLUG=""
+INTENT=""
+MODE="interactive"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --auto) MODE="auto"; shift ;;
+    --stdin) MODE="stdin"; shift ;;
+    -h|--help)
+      sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    *) [ -z "$SLUG" ] && SLUG="$1" || INTENT="$1"; shift ;;
+  esac
+done
+
+[ -z "$SLUG" ] && die "usage: vibe-spec-intake <slug> \"<1-line intent>\""
+
+# If --stdin, read intent from stdin.
+if [ "$MODE" = "stdin" ]; then
+  INTENT="$(cat)"
+fi
+
+# Sanitize slug: lowercase, dashes only.
+SLUG="$(printf '%s' "$SLUG" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+|-+$//g')"
+[ -z "$SLUG" ] && die "invalid slug"
+[ -z "$INTENT" ] && die "no intent provided (use --stdin or pass as 2nd arg)"
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$PROJECT_ROOT" 2>/dev/null || die "no project root"
+SPEC_DIR="$PROJECT_ROOT/docs/requirements/$SLUG"
+SPEC="$SPEC_DIR/spec.md"
+
+if [ -e "$SPEC" ]; then
+  echo "vibe-spec-intake: $SPEC already exists."
+  echo "  edit it directly, or delete it and re-run."
+  exit 1
+fi
+
+mkdir -p "$SPEC_DIR"
+
+# Generate AC templates from the intent. v0.1 keeps this dumb-and-honest:
+# produce 8 generic AC slots the developer must fill in. The point isn't to
+# guess requirements — it's to FORCE the developer to enumerate them.
+generate_template() {
+  local today
+  today="$(date -u +%Y-%m-%d)"
+  cat <<EOF
+# $SLUG
+
+* **Status:** awaiting-approval
+* **Date:** $today
+
+## Goal
+
+$INTENT
+
+## Acceptance Criteria
+
+Each AC is one test. The Coder writes the test, then the implementation.
+
+- AC1. <describe the primary happy-path behavior>
+- AC2. <describe the most important error path>
+- AC3. <describe at least one edge case the AI would otherwise miss>
+- AC4. <describe the constraint that keeps this from breaking other features>
+- AC5. <describe what this feature does NOT do — see Non-Goals>
+
+## Constraints
+
+- <what the Coder must NOT do>
+
+## Non-Goals
+
+- <what this feature is explicitly NOT>
+
+## Edge Cases
+
+- <list 2-3 failure modes you've thought about>
+
+## Verification
+
+For each AC, fill in a \`Verification:\` block:
+
+\`\`\`
+- AC1. <description>
+  Verification:
+    automated test: tests/<file>.py::test_<name>
+    expected behavior: <one-line>
+\`\`\`
+EOF
+}
+
+if [ "$MODE" = "interactive" ]; then
+  cat >&2 <<EOF
+Generating a Spec template at $SPEC.
+
+The template is dumb on purpose. Your job is to fill in the real ACs.
+
+Next steps:
+  1. Open $SPEC
+  2. Replace each AC stub with a real, testable behavior
+  3. Add Edge Cases you don't want the AI to miss
+  4. Run: /vibe-spec $SLUG --review
+
+When the Spec is what you actually want, flip Status to \`in-progress\`.
+The Coder will start implementing AC1.
+EOF
+  generate_template > "$SPEC"
+  echo "  ✓ wrote $SPEC"
+  exit 0
+fi
+
+# --auto mode: still write the template (the developer must review).
+generate_template > "$SPEC"
+echo "$SPEC"

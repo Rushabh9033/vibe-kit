@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# vibe-claim-check — Weapon 6.
+#
+# Force per-AC evidence before claiming a feature is done.
+# Reads a feature spec, extracts ACs, runs the detected tests, and
+# demands evidence per AC. PASS only if every AC has a passing test
+# tied to it + visible diff lines.
+#
+# Usage:
+#   vibe-claim-check [slug]
+#
+# Output: per-AC evidence report + final verdict.
+# Exit: 0 PASS / 1 FAIL (tests failed) / 2 PARTIAL (some ACs lack evidence)
+
+set -uo pipefail
+
+die() { echo "vibe-claim-check: $*" >&2; exit 4; }
+
+KIT_ROOT_DEFAULT="$HOME/.claude/vibe-kit/bin"
+KIT_BIN="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
+
+# Resolve kit root: prefer the in-repo bin if running from a dev checkout.
+if [ -x "$KIT_BIN/vibe-test" ]; then
+  : # local checkout
+elif [ -x "$KIT_ROOT_DEFAULT/vibe-test" ]; then
+  KIT_BIN="$KIT_ROOT_DEFAULT"
+else
+  KIT_BIN="$KIT_ROOT_DEFAULT"
+fi
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$PROJECT_ROOT" 2>/dev/null || die "no project root"
+
+# Find the spec — explicit slug, or most-recent.
+SLUG="${1:-}"
+if [ -z "$SLUG" ]; then
+  SLUG="$(ls -t "$PROJECT_ROOT/docs/requirements"/*/spec.md 2>/dev/null | head -1 | xargs dirname 2>/dev/null | xargs basename 2>/dev/null || true)"
+fi
+[ -z "$SLUG" ] && die "no feature slug (no spec found in docs/requirements/)"
+SPEC="$PROJECT_ROOT/docs/requirements/$SLUG/spec.md"
+[ -f "$SPEC" ] || die "spec not found: $SPEC"
+
+# Extract ACs and their Verification blocks.
+# Format: AC id | <one-line summary> | <automated test path>
+# Bash 3.2 (macOS default) doesn't have `mapfile` — use a while-read loop.
+ACS=()
+while IFS= read -r line; do
+  [ -n "$line" ] && ACS+=("$line")
+done < <(awk '
+  /^## Acceptance Criteria/ { in_ac = 1; next }
+  /^## /                   { in_ac = 0 }
+  in_ac {
+    if (/^- AC[0-9]+/) {
+      sub(/^- /, "")
+      # split on first dot for id, rest for body
+      id = $1; sub(/\.$/, "", id)
+      sub(/^[^ ]+ */, "")
+      printf "%s\t%s\n", id, $0
+    }
+  }
+' "$SPEC")
+
+[ "${#ACS[@]}" -eq 0 ] && die "no Acceptance Criteria found in $SPEC"
+
+# For each AC, look for `Verification:` block — pick up `automated test:` line.
+# Bash 3.2 (macOS default) doesn't have `declare -A` (associative arrays).
+# Use a temp file as a lookup table: one `<id>=<path>` line per AC.
+AC_TEST_FILE="$(mktemp -t vibe-claim.XXXXXX)"
+trap 'rm -f "$AC_TEST_FILE"' EXIT
+: > "$AC_TEST_FILE"
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  # Extract AC id from preceding context: AC3. → "AC3"
+  ac_id="$(printf '%s\n' "$line" | sed -nE 's/^[[:space:]]*- (AC[0-9]+)\..*/\1/p' | head -1)"
+  test_path="$(printf '%s\n' "$line" | grep -E '^\s*automated test:' | head -1 | sed -E 's/^\s*automated test:\s*//')"
+  [ -n "$ac_id" ] && [ -n "$test_path" ] && printf '%s=%s\n' "$ac_id" "$test_path" >> "$AC_TEST_FILE"
+done < <(awk '
+  /^## Acceptance Criteria/ { in_ac = 1; next }
+  /^## /                   { in_ac = 0 }
+  in_ac { print }
+' "$SPEC")
+
+# Helper: look up test path for an AC id.
+lookup_test() {
+  local id="$1"
+  grep -E "^${id}=" "$AC_TEST_FILE" 2>/dev/null | head -1 | cut -d= -f2-
+}
+
+# Run the test suite once. vibe-test handles detection + status.
+TEST_OUTPUT="$(bash "$KIT_BIN/vibe-test" 2>&1)" || true
+TEST_RC=$?
+
+echo "vibe-claim-check: feature=$SLUG"
+echo
+printf '%s\n' "$TEST_OUTPUT"
+echo
+echo "## Per-AC evidence"
+
+DIFF_FILES="$(git -C "$PROJECT_ROOT" diff --name-only HEAD 2>/dev/null | sort -u)"
+
+missing_evidence=0
+# `${ARR[@]+...}` so empty arrays don't trigger `unbound variable`.
+for ac in ${ACS[@]+"${ACS[@]}"}; do
+  IFS=$'\t' read -r id body <<< "$ac"
+  test_path="$(lookup_test "$id")"
+  printf -- '- %s. %s\n' "$id" "$body"
+  if [ -z "$test_path" ]; then
+    echo "    evidence: NONE (no Verification block)"
+    missing_evidence=$((missing_evidence + 1))
+  else
+    echo "    test: $test_path"
+    if printf '%s\n' "$DIFF_FILES" | grep -qF "$test_path"; then
+      echo "    diff:  ✓ test file touched"
+    else
+      echo "    diff:  ✗ test file NOT in diff"
+      missing_evidence=$((missing_evidence + 1))
+    fi
+  fi
+done
+
+echo
+if [ "$missing_evidence" -gt 0 ]; then
+  echo "verdict: PARTIAL ($missing_evidence/${#ACS[@]} ACs lack evidence)"
+  exit 2
+fi
+
+if [ "$TEST_RC" -eq 0 ]; then
+  echo "verdict: PASS"
+  exit 0
+fi
+
+echo "verdict: FAIL (tests did not pass)"
+exit 1

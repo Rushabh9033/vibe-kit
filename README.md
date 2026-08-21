@@ -53,6 +53,23 @@ Two deterministic runtime layers keep the AI honest while it codes and after:
 
 Both layers are spec'd together in [`docs/superpowers/specs/2026-08-21-smart-vibe-coder-design.md`](docs/superpowers/specs/2026-08-21-smart-vibe-coder-design.md). Both are pure determinism — no AI calls.
 
+### The weapon suite — *when you want the kit to enforce, not suggest*
+
+The kit also ships **7 weapons** that turn "encouragement" into "enforcement." Off by default. Opt in with `vibe-arm`:
+
+- `vibe-arm` — turns on the full hard-gate suite for the current project
+- `vibe-disarm` — reverts
+
+Once armed, the kit **blocks** the wrong thing from happening:
+
+- Editing source without an active AC declared (`vibe-edit-gate`)
+- Editing source without a corresponding test (`vibe-tdd-gate`)
+- Editing files touched by recent `fix:` commits (`vibe-fix-detector`)
+- Claiming "done" without per-AC evidence (`/vibe-claim-check`)
+- …plus telemetry hooks (`vibe-ac-progress`, `vibe-bug-mirror`) so the gates are visible, not invisible
+
+The v0.1 layers (prep-room + vibe-test) tell the Coder what's going on. The weapons make the Coder obey.
+
 ### Spec-first. Planner optional.
 
 The Spec is mandatory. The Planner is optional.
@@ -201,8 +218,13 @@ vibe-kit/
 │   │   ├── vibe-verify         ← Spec ↔ code ↔ tests contract checker
 │   │   ├── vibe-classify       ← diff → tiny|normal|large|critical
 │   │   ├── vibe-test           ← test oracle (lint/typecheck/unit/integration)
+│   │   ├── vibe-spec-intake    ← weapon 1: 1-line intent → spec with ACs
+│   │   ├── vibe-claim-check    ← weapon 6: per-AC evidence at ship
+│   │   ├── vibe-arm            ← the ultimate weapon: arm all gates
 │   │   ├── vibe-init           ← scaffolds a project
-│   │   └── hooks/              ← prep-room, guard-unsafe, format-on-edit, handoff, pre-push
+│   │   └── hooks/              ← prep-room, vibe-edit-gate, vibe-tdd-gate,
+│   │                              vibe-fix-detector, vibe-ac-progress,
+│   │                              vibe-bug-mirror, guard-unsafe, handoff, pre-push
 │   ├── commands/               ← /vibe-* slash commands
 │   ├── rules/                  ← modular rules (security, verify, cost)
 │   ├── installers/             ← per-tool skill packs
@@ -212,7 +234,7 @@ vibe-kit/
 ├── docs/                       ← playbook, architecture, ceremony levels
 ├── examples/                   ← intake, spec, plan, handoff samples
 │   └── todo-cli/               ← runnable Spec → Code → Verify → Ship demo
-└── tests/                      ← verify, classify, vibe-test, prep-room tests
+└── tests/                      ← verify, classify, vibe-test, prep-room, weapons tests
 ```
 
 ## Two entry points, one Spec

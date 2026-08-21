@@ -5,6 +5,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Added — Smart Vibe Coder weapon suite (v0.2) — *the hard gates*
+
+The kit now ships **7 weapons** + a **bundle command** (`vibe-arm`) that turns them on for a project. Off by default. Run `vibe-arm` to opt in. `vibe-disarm` reverts.
+
+The weapons are the kit's response to the 3 problems solo vibe-coders hit: half-built apps, no tests, context loss. v0.1 surfaced context; v0.2 **blocks** the wrong thing from happening.
+
+| Weapon | Path | What it does |
+|---|---|---|
+| `vibe-spec-intake` | `kit/bin/vibe-spec-intake` | Weapon 1. Takes a 1-line intent, writes `docs/requirements/<slug>/spec.md` with Status: awaiting-approval and 5 AC stubs the developer must fill in. Forces enumeration before code. |
+| `vibe-edit-gate` | `kit/bin/hooks/vibe-edit-gate.sh` | Weapon 2. PreToolUse. **BLOCKS** Edit/Write unless `.vibe-cache/current-ac` is set. Forces the Coder to declare which AC it's implementing. |
+| `vibe-tdd-gate` | `kit/bin/hooks/vibe-tdd-gate.sh` | Weapon 3. PreToolUse. **BLOCKS** Edit on `src/X` unless a test file for `X` has been edited in this session. Kills "no tests" at the keystroke. |
+| `vibe-fix-detector` | `kit/bin/hooks/vibe-fix-detector.sh` | Weapon 4. PreToolUse. Warns (always) or **BLOCKS** (armed) edits to files touched by recent `fix:` / `bug:` / `hotfix:` commits. Catches "fixed bug reappears." |
+| `vibe-ac-progress` | `kit/bin/hooks/vibe-ac-progress.sh` | Weapon 5. PostToolUse. After every Edit, prints `[vibe-ac] <feature>: <done>/<total> ACs done · next: AC<N>`. Telemetry layer that makes gates 2+3 tolerable. |
+| `vibe-claim-check` | `kit/bin/vibe-claim-check` + `kit/commands/vibe-claim-check.md` | Weapon 6. Slash command. Demands evidence per AC at ship time (test path + diff) instead of "I think it's done." |
+| `vibe-bug-mirror` | `kit/bin/hooks/vibe-bug-mirror.sh` | Weapon 7. Stop hook. Counts commit prefixes (`spec:` / `fix:` / `test:` / `code:`) in this session and prints the fix-vs-build ratio. Drives Spec quality. |
+| **`vibe-arm`** | `kit/bin/vibe-arm` | **The ultimate weapon.** Writes `.vibe-cache/armed`, wires all 6 hooks into `.claude/settings.json` (preserves existing hooks), reports what was armed. Idempotent. `vibe-arm --disarm` reverts. |
+
+**Why this matters:** until now, vibe-kit's discipline was opt-in. You could ignore the Spec and ship anyway. With weapons armed, `Edit src/foo.py` without a declared AC fails. `git commit` after editing a `fix:` file without explanation fails. The kit becomes a hard shell around the workflow, not a suggestion.
+
+**Off by default.** Arming a project is explicit. Run `vibe-arm` once. Run `vibe-disarm` to revert. Existing projects that haven't armed are unchanged.
+
+### Tests
+- **`tests/weapons/test-weapons.sh`** — 29 assertions. Covers arm/disarm idempotency, every weapon's allowed/blocked paths, exit codes, stderr content, wiring into `.claude/settings.json`, and the AC-progress telemetry format.
+
 ### Added — Smart Vibe Coder (v0.1)
 The kit now ships two deterministic runtime layers: a **test oracle** that runs the project's tests across configured ranks with honest exit codes, and a **prep-room** PreToolUse hook that surfaces relevant context (recent commits, affected tests, Spec ACs) into the Coder's view before each Edit/Write. Both layers are pure determinism, no AI calls. See `docs/superpowers/specs/2026-08-21-smart-vibe-coder-design.md`.
 
