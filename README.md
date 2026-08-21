@@ -119,6 +119,11 @@ cp kit/templates/features/webhook-receiver.md \
 vibe-spec-approve <your-slug>     # approve + arm the kit
 ```
 
+You can also use AI-assisted intake to generate the Spec:
+```bash
+vibe-spec-intake webhook "send an HMAC-signed POST on order shipped" --ai
+```
+
 Gallery: [`kit/templates/features/`](kit/templates/features/). See [`kit/templates/features/README.md`](kit/templates/features/README.md) for the full table + workflow.
 
 ## What this kit does NOT do
@@ -216,6 +221,14 @@ The pre-push hook above runs `vibe-claim-check` (not `vibe-verify`) by default. 
 | `/vibe-claim-check` | **Ship time (pre-push)** | Per-AC evidence + actually-run tests | Slow (runs full suite) |
 
 Use verify throughout development. The pre-push hook enforces claim-check at ship time.
+
+### Mutation testing
+
+At ship time, `vibe-claim-check` also runs **`vibe-mutate`**, which performs language-aware mutation testing to prove your tests actually exercise your code. It requires your mutation score to meet a threshold (default 70%).
+
+- Auto-detects Python (`mutmut`), Node (`stryker`), and Java (`pitest`).
+- If your mutation score falls below the threshold, `vibe-claim-check` returns PARTIAL and blocks the push (can be overridden with `VIBE_SHIP_OVERRIDE=1`).
+- Run manually: `vibe-mutate --threshold=80`
 
 ## Templates
 

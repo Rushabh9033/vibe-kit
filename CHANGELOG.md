@@ -5,6 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Added — AI-assisted intake (--ai flag)
+`vibe-spec-intake` now supports an `--ai` flag to automatically generate intent-specific Acceptance Criteria, Constraints, Edge Cases, and Non-Goals using the `claude` CLI. It falls back to the template if the CLI is unavailable.
+
 ### Added — Smart Vibe Coder weapon suite (v0.2) — *the hard gates*
 
 The kit now ships **7 weapons** + a **bundle command** (`vibe-arm`) that turns them on for a project. Off by default. Run `vibe-arm` to opt in. `vibe-disarm` reverts.
@@ -20,6 +23,7 @@ The weapons are the kit's response to the 3 problems solo vibe-coders hit: half-
 | `vibe-ac-progress` | `kit/bin/hooks/vibe-ac-progress.sh` | Weapon 5. PostToolUse. After every Edit, prints `[vibe-ac] <feature>: <done>/<total> ACs done · next: AC<N>`. Telemetry layer that makes gates 2+3 tolerable. |
 | `vibe-claim-check` | `kit/bin/vibe-claim-check` + `kit/commands/vibe-claim-check.md` | Weapon 6. Slash command. Demands evidence per AC at ship time (test path + diff) instead of "I think it's done." |
 | `vibe-bug-mirror` | `kit/bin/hooks/vibe-bug-mirror.sh` | Weapon 7. Stop hook. Counts commit prefixes (`spec:` / `fix:` / `test:` / `code:`) in this session and prints the fix-vs-build ratio. Drives Spec quality. |
+| `vibe-mutate` | `kit/bin/vibe-mutate` | Mutation testing as Rank 1 verification. Fails the ship if the score is below the threshold (default 70). |
 | **`vibe-arm`** | `kit/bin/vibe-arm` | **The ultimate weapon.** Writes `.vibe-cache/armed`, wires all 6 hooks into `.claude/settings.json` (preserves existing hooks), reports what was armed. Idempotent. `vibe-arm --disarm` reverts. |
 
 **Why this matters:** until now, vibe-kit's discipline was opt-in. You could ignore the Spec and ship anyway. With weapons armed, `Edit src/foo.py` without a declared AC fails. `git commit` after editing a `fix:` file without explanation fails. The kit becomes a hard shell around the workflow, not a suggestion.

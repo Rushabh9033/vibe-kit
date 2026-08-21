@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+# vibe-mutate — language-aware mutation testing at ship time.
+#
+# Proves your tests actually exercise the AC, not just talk about it.
+# `vibe-verify` is a keyword matcher (fast, mid-dev). `vibe-test` runs
+# the test suite. Neither catches "tests pass but don't actually test
+# the code." Mutation testing does.
+#
+# Exit codes (mirror vibe-test discipline):
+#   0  PASS       — score >= threshold
+#   1  FAIL       — score < threshold
+#   2  BLOCK      — runner detected but tool missing
+#   3  UNVERIFIED — no language detected
+#   4  config error
+#
+# Usage:
+#   vibe-mutate                    # default threshold 70
+#   vibe-mutate --threshold=80
+#   vibe-mutate --json
+#   vibe-mutate --verbose
+#
+# Detection:
+#   - Python: pyproject.toml / pytest.ini + tests/ → mutmut
+#   - Node:   package.json with stryker dep        → npx stryker run
+#   - Java:   pom.xml / build.gradle + PIT         → mvn pitest
+#   - Other:  exit 3
+
+set -uo pipefail
+
+die() { echo "vibe-mutate: $*" >&2; exit 4; }
+
+PROJECT_ROOT="$(pwd)"
+THRESHOLD=70
+JSON=0
+VERBOSE=0
+LANG_DETECTED=""
+RUNNER_DETECTED=""
+TOOL_CMD=""
+SCORE=""
+TOOL_OUTPUT_FILE=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --threshold=*) THRESHOLD="${1#*=}" ;;
+    --json)        JSON=1 ;;
+    --verbose)     VERBOSE=1 ;;
+    -h|--help)
+      sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    *) die "unknown flag: $1" ;;
+  esac
+  shift
+done
+
+# Threshold must be 0-100.
+case "$THRESHOLD" in
+  ''|*[!0-9]*) die "threshold must be an integer 0-100, got: $THRESHOLD" ;;
+esac
+[ "$THRESHOLD" -ge 0 ] && [ "$THRESHOLD" -le 100 ] || die "threshold out of range: $THRESHOLD"
+
+# ---------- detection ----------
+PYPROJECT="$PROJECT_ROOT/pyproject.toml"
+PACKAGE_JSON="$PROJECT_ROOT/package.json"
+POM="$PROJECT_ROOT/pom.xml"
+GRADLE="$PROJECT_ROOT/build.gradle"
+GRADLE_KTS="$PROJECT_ROOT/build.gradle.kts"
+
+detect_python() {
+  [ -f "$PYPROJECT" ] || [ -f "$PROJECT_ROOT/pytest.ini" ] || [ -f "$PROJECT_ROOT/setup.py" ] || return 1
+  [ -d "$PROJECT_ROOT/tests" ] || return 1
+  command -v mutmut >/dev/null 2>&1 && TOOL_CMD="mutmut run --no-progress" && return 0
+  TOOL_CMD="__missing__"
+  return 0
+}
+
+detect_node() {
+  [ -f "$PACKAGE_JSON" ] || return 1
+  grep -qE '"@stryker-mutator/core"' "$PACKAGE_JSON" 2>/dev/null || return 1
+  if command -v npx >/dev/null 2>&1; then
+    TOOL_CMD="npx --no-install stryker run --json"
+    return 0
+  fi
+  TOOL_CMD="__missing__"
+  return 0
+}
+
+detect_java() {
+  if [ -f "$POM" ]; then
+    grep -qE 'pitest' "$POM" 2>/dev/null || return 1
+    command -v mvn >/dev/null 2>&1 && TOOL_CMD="mvn -q org.pitest:pitest-maven:mutationCoverage" && return 0
+    TOOL_CMD="__missing__"
+    return 0
+  fi
+  if [ -f "$GRADLE" ] || [ -f "$GRADLE_KTS" ]; then
+    grep -qE 'pitest|gradle-pitest-plugin' "$GRADLE" "$GRADLE_KTS" 2>/dev/null || return 1
+    command -v gradle >/dev/null 2>&1 && TOOL_CMD="gradle pitest -q" && return 0
+    TOOL_CMD="__missing__"
+    return 0
+  fi
+  return 1
+}
+
+# Try languages in order. First match wins.
+if detect_python; then
+  LANG_DETECTED="python"
+  RUNNER_DETECTED="mutmut"
+elif detect_node; then
+  LANG_DETECTED="node"
+  RUNNER_DETECTED="stryker"
+elif detect_java; then
+  LANG_DETECTED="java"
+  RUNNER_DETECTED="pitest"
+fi
+
+# ---------- no language detected ----------
+if [ -z "$LANG_DETECTED" ]; then
+  if [ "$JSON" -eq 1 ]; then
+    printf '{"status":"UNVERIFIED","reason":"no language detected","hint":"add pyproject.toml/package.json/pom.xml with a mutation tool configured"}\n'
+  else
+    echo "vibe-mutate: UNVERIFIED — no language detected"
+    echo "  hint: configure mutmut (Python), @stryker-mutator/core (Node), or pitest (Java)"
+  fi
+  exit 3
+fi
+
+# ---------- runner missing ----------
+if [ "$TOOL_CMD" = "__missing__" ]; then
+  if [ "$JSON" -eq 1 ]; then
+    printf '{"status":"BLOCK","language":"%s","runner":"%s","reason":"runner detected but tool not installed"}\n' "$LANG_DETECTED" "$RUNNER_DETECTED"
+  else
+    echo "vibe-mutate: BLOCK — runner=$RUNNER_DETECTED configured but tool not installed"
+    case "$LANG_DETECTED" in
+      python) echo "  install: pip install mutmut" ;;
+      node)   echo "  install: npm install --save-dev @stryker-mutator/core" ;;
+      java)   echo "  install: see https://pitest.org/ (mvn: org.pitest:pitest-maven:mutationCoverage)" ;;
+    esac
+  fi
+  exit 2
+fi
+
+# ---------- run mutation tool ----------
+TOOL_OUTPUT_FILE="$(mktemp -t vibe-mutate.XXXXXX)"
+trap 'rm -f "$TOOL_OUTPUT_FILE"' EXIT
+
+if [ "$VERBOSE" -eq 1 ]; then
+  echo "  → $TOOL_CMD"
+  bash -c "$TOOL_CMD" 2>&1 | tee "$TOOL_OUTPUT_FILE"
+  tool_rc=${PIPESTATUS[0]}
+else
+  bash -c "$TOOL_CMD" > "$TOOL_OUTPUT_FILE" 2>&1
+  tool_rc=$?
+fi
+
+if [ "$tool_rc" -ne 0 ] && [ "$tool_rc" -ne 1 ]; then
+  # Non-1, non-0 → tool error (compile failure, etc.)
+  if [ "$JSON" -eq 1 ]; then
+    printf '{"status":"FAIL","language":"%s","runner":"%s","reason":"mutation tool exited with code %d"}\n' "$LANG_DETECTED" "$RUNNER_DETECTED" "$tool_rc"
+  else
+    echo "vibe-mutate: FAIL — mutation tool exited with code $tool_rc"
+    echo "  --- last 30 lines of tool output ---"
+    tail -30 "$TOOL_OUTPUT_FILE" | sed 's/^/  /'
+  fi
+  exit 1
+fi
+
+# ---------- parse score ----------
+# Different tools output different formats. Each parser extracts a
+# 0-100 integer into SCORE.
+parse_score() {
+  case "$RUNNER_DETECTED" in
+    mutmut)
+      # mutmut v2+: look for "X/Y" or "X mutations / Y total" or "%"
+      SCORE="$(grep -oE '[0-9]+/[0-9]+' "$TOOL_OUTPUT_FILE" | head -1 | awk -F/ '{
+        if ($2 > 0) { printf "%d", ($1/$2)*100; exit }
+      }')"
+      # Fallback: percentage literal
+      if [ -z "$SCORE" ]; then
+        SCORE="$(grep -oE '[0-9]+%' "$TOOL_OUTPUT_FILE" | head -1 | tr -d '%')"
+      fi
+      ;;
+    stryker)
+      # Stryker --json writes JSON. Look for mutationScore (0-1) or score.
+      SCORE="$(python3 -c "
+import json, sys
+try:
+    with open('$TOOL_OUTPUT_FILE') as f:
+        data = json.load(f)
+    # Stryker's keys: 'mutationScore' is 0-1 in newer versions
+    val = None
+    if isinstance(data, dict):
+        # newer Stryker: top-level mutationScore is ratio
+        if 'mutationScore' in data and isinstance(data['mutationScore'], (int, float)):
+            val = data['mutationScore']
+        elif 'files' in data:
+            # aggregate from per-file
+            total_killed = 0
+            total_mutants = 0
+            for fpath, fdata in data.get('files', {}).items():
+                mutants = fdata.get('mutants', [])
+                for m in mutants:
+                    if m.get('status') == 'Killed':
+                        total_killed += 1
+                    total_mutants += 1
+            if total_mutants > 0:
+                val = total_killed / total_mutants
+    if val is None:
+        sys.exit(1)
+    print(int(round(val * 100)))
+except Exception:
+    sys.exit(1)
+" 2>/dev/null)"
+      ;;
+    pitest)
+      # PIT XML/console: look for "Mutation Coverage <n>%"
+      SCORE="$(grep -oE 'Mutation Coverage[^0-9]*[0-9]+%' "$TOOL_OUTPUT_FILE" | head -1 | grep -oE '[0-9]+' | tail -1)"
+      if [ -z "$SCORE" ]; then
+        SCORE="$(grep -oE '[0-9]+%' "$TOOL_OUTPUT_FILE" | head -1 | tr -d '%')"
+      fi
+      ;;
+  esac
+}
+
+parse_score
+
+if [ -z "$SCORE" ]; then
+  if [ "$JSON" -eq 1 ]; then
+    printf '{"status":"BLOCK","language":"%s","runner":"%s","reason":"could not parse score from tool output"}\n' "$LANG_DETECTED" "$RUNNER_DETECTED"
+  else
+    echo "vibe-mutate: BLOCK — could not parse mutation score from $RUNNER_DETECTED output"
+    echo "  --- last 30 lines of tool output ---"
+    tail -30 "$TOOL_OUTPUT_FILE" | sed 's/^/  /'
+  fi
+  exit 2
+fi
+
+# Score must be numeric.
+case "$SCORE" in
+  ''|*[!0-9]*) die "parsed score is not numeric: '$SCORE'" ;;
+esac
+
+# ---------- verdict ----------
+status="PASS"
+if [ "$SCORE" -lt "$THRESHOLD" ]; then
+  status="FAIL"
+fi
+
+if [ "$JSON" -eq 1 ]; then
+  printf '{"status":"%s","score":%s,"threshold":%s,"language":"%s","runner":"%s"}\n' "$status" "$SCORE" "$THRESHOLD" "$LANG_DETECTED" "$RUNNER_DETECTED"
+else
+  echo "vibe-mutate: $status (score=$SCORE%, threshold=$THRESHOLD%)"
+  printf '  %-12s %s\n' "language" "$LANG_DETECTED"
+  printf '  %-12s %s\n' "runner"    "$RUNNER_DETECTED"
+  printf '  %-12s %s%%\n' "score"     "$SCORE"
+  printf '  %-12s %s%%\n' "threshold" "$THRESHOLD"
+fi
+
+case "$status" in
+  PASS) exit 0 ;;
+  FAIL) exit 1 ;;
+esac

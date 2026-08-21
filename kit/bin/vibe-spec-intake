@@ -11,9 +11,9 @@
 #   --auto (for /vibe-spec or scripts): generates ACs from a template, no Q&A.
 #
 # Usage:
-#   vibe-spec-intake <slug> "<1-line intent>"
-#   vibe-spec-intake --auto <slug> "<1-line intent>"
-#   cat intent.txt | vibe-spec-intake --stdin <slug>
+#   vibe-spec-intake [--ai] <slug> "<1-line intent>"
+#   vibe-spec-intake [--ai] --auto <slug> "<1-line intent>"
+#   cat intent.txt | vibe-spec-intake [--ai] --stdin <slug>
 #
 # Output: a markdown spec with Goal, ACs (atomic, one test each), Constraints,
 #         Non-Goals, Edge Cases. Status: awaiting-approval.
@@ -25,13 +25,15 @@ die() { echo "vibe-spec-intake: $*" >&2; exit 4; }
 SLUG=""
 INTENT=""
 MODE="interactive"
+USE_AI=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --auto) MODE="auto"; shift ;;
     --stdin) MODE="stdin"; shift ;;
+    --ai) USE_AI=1; shift ;;
     -h|--help)
-      sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) [ -z "$SLUG" ] && SLUG="$1" || INTENT="$1"; shift ;;
   esac
@@ -62,13 +64,75 @@ fi
 
 mkdir -p "$SPEC_DIR"
 
-# Generate AC templates from the intent. v0.1 keeps this dumb-and-honest:
-# produce 8 generic AC slots the developer must fill in. The point isn't to
-# guess requirements — it's to FORCE the developer to enumerate them.
+generate_ai() {
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "vibe-spec-intake: AI not available, falling back" >&2
+    return 1
+  fi
+  local prompt_tmpl
+  # Resolve prompt template relative to this script (kit-owned, not project-owned).
+  local script_dir
+  script_dir="$(cd "$(dirname "$0")" && pwd)"
+  # Walk up to find kit root (script_dir/../prompts or wherever prompts live).
+  local kit_root
+  kit_root="$(cd "$script_dir/.." && pwd)"
+  prompt_tmpl="$kit_root/prompts/spec-intake.md"
+  if [ ! -f "$prompt_tmpl" ]; then
+    echo "vibe-spec-intake: prompt template missing, falling back" >&2
+    return 1
+  fi
+  local today
+  today="$(date -u +%Y-%m-%d)"
+  
+  local prompt_file
+  prompt_file="$(mktemp -t vibe-intake-prompt.XXXXXX)"
+  
+  awk -v intent="$INTENT" -v slug="$SLUG" -v date="$today" '
+    {
+      gsub(/\{\{INTENT\}\}/, intent)
+      gsub(/\{\{SLUG\}\}/, slug)
+      gsub(/\{\{DATE\}\}/, date)
+      print
+    }
+  ' "$prompt_tmpl" > "$prompt_file"
+  
+  local out_file
+  out_file="$(mktemp -t vibe-intake-out.XXXXXX)"
+  
+  echo "vibe-spec-intake: invoking AI (this costs tokens)..." >&2
+  
+  if ! claude --print "$(cat "$prompt_file")" > "$out_file" 2>/dev/null; then
+    echo "vibe-spec-intake: AI invocation failed, falling back" >&2
+    rm -f "$prompt_file" "$out_file"
+    return 1
+  fi
+  
+  local ai_out
+  ai_out="$(cat "$out_file")"
+  rm -f "$prompt_file" "$out_file"
+  
+  if [ -z "$ai_out" ]; then
+    echo "vibe-spec-intake: AI output was empty, falling back" >&2
+    return 1
+  fi
+  
+  local intent_kws
+  intent_kws="$(printf '%s' "$INTENT" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '\n' | awk 'length($0) >= 4' | head -5 | paste -sd '|' -)"
+  if [ -n "$intent_kws" ]; then
+    if ! printf '%s' "$ai_out" | grep -qiE "($intent_kws)"; then
+      echo "vibe-spec-intake: AI output failed validation, falling back" >&2
+      return 1
+    fi
+  fi
+  
+  printf '%s\n' "$ai_out"
+  return 0
+}
+
 generate_template() {
   local today
   today="$(date -u +%Y-%m-%d)"
-  cat <<EOF
+  cat <<TMPL
 # $SLUG
 
 * **Status:** awaiting-approval
@@ -110,8 +174,31 @@ For each AC, fill in a \`Verification:\` block:
     automated test: tests/<file>.py::test_<name>
     expected behavior: <one-line>
 \`\`\`
-EOF
+TMPL
 }
+
+if [ "$USE_AI" -eq 1 ]; then
+  if generate_ai > "$SPEC"; then
+    if [ "$MODE" = "interactive" ]; then
+      cat >&2 <<EOF
+Generated AI-assisted Spec at $SPEC.
+
+Next steps:
+  1. Open $SPEC
+  2. Review the AI's ACs and Constraints
+  3. Edit anything that doesn't match what you meant
+  4. Run: /vibe-spec $SLUG --review
+
+When the Spec is what you actually want, flip Status to \`in-progress\`.
+EOF
+      echo "  ✓ wrote $SPEC"
+      exit 0
+    else
+      echo "$SPEC"
+      exit 0
+    fi
+  fi
+fi
 
 if [ "$MODE" = "interactive" ]; then
   cat >&2 <<EOF

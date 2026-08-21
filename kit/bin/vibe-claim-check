@@ -90,9 +90,37 @@ lookup_test() {
 TEST_OUTPUT="$(bash "$KIT_BIN/vibe-test" 2>&1)" || true
 TEST_RC=$?
 
+# Run mutation testing as a post-test step (ship-time only).
+#   rc=0 (PASS)            → continue normally
+#   rc=1 (FAIL)            → claim-check becomes PARTIAL (override can lift)
+#   rc=2 (BLOCK)           → claim-check becomes PARTIAL (override can lift)
+#   rc=3 (UNVERIFIED)      → skip with warning (project too small / not configured)
+#   rc=4 (config error)    → skip with warning
+MUTATE_OUTPUT=""
+MUTATE_RC=4
+if [ -x "$KIT_BIN/vibe-mutate" ]; then
+  MUTATE_OUTPUT="$(bash "$KIT_BIN/vibe-mutate" 2>&1)" || true
+  MUTATE_RC=$?
+  if [ "$MUTATE_RC" -eq 1 ] || [ "$MUTATE_RC" -eq 2 ]; then
+    MUTATE_VERDICT="FAIL"
+    [ "$MUTATE_RC" -eq 2 ] && MUTATE_VERDICT="BLOCK"
+  fi
+fi
+
 echo "vibe-claim-check: feature=$SLUG"
 echo
 printf '%s\n' "$TEST_OUTPUT"
+echo
+echo "## Mutation evidence"
+if [ -z "$MUTATE_OUTPUT" ]; then
+  echo "  (skipped: vibe-mutate not installed)"
+elif [ "$MUTATE_RC" -eq 3 ]; then
+  echo "  (skipped: no mutation language detected)"
+elif [ "$MUTATE_RC" -eq 4 ]; then
+  echo "  (skipped: vibe-mutate config error)"
+else
+  printf '%s\n' "$MUTATE_OUTPUT" | sed 's/^/  /'
+fi
 echo
 echo "## Per-AC evidence"
 
@@ -121,6 +149,13 @@ done
 echo
 if [ "$missing_evidence" -gt 0 ]; then
   echo "verdict: PARTIAL ($missing_evidence/${#ACS[@]} ACs lack evidence)"
+  exit 2
+fi
+
+# Mutation failure becomes PARTIAL too — not a hard FAIL, because
+# override should still be able to lift it. Override can't lift FAIL.
+if [ "$MUTATE_RC" -eq 1 ] || [ "$MUTATE_RC" -eq 2 ]; then
+  echo "verdict: PARTIAL (mutation $MUTATE_VERDICT — VIBE_SHIP_OVERRIDE=1 can lift)"
   exit 2
 fi
 

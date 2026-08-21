@@ -29,6 +29,7 @@ Full decision tree: `kit/templates/spec-first-gate.md`.
 ## Always
 
 - Run lint + typecheck + tests before declaring done.
+- Run mutation testing (Rank 1 verification) via `vibe-mutate` at ship time.
 - Reject any new dependency that isn't on the allowlist, hasn't been registry-verified (`npm view <pkg>` / `pip index versions <pkg>`), and hasn't passed the license audit.
 - Document gotchas in `docs/gotchas.md` on discovery.
 - Update the project `AGENTS.md` (or `~/.claude/CLAUDE.md` if global) when a mistake repeats (Boris Cherny's compound-corrections pattern).

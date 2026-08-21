@@ -27,6 +27,8 @@ Write `docs/requirements/<feature-slug>/spec.md` from the user's intake answers,
 
 If `<feature-slug>` is omitted, derive from the user's intake (kebab-case, ≤ 40 chars).
 
+Note: You can also use the command-line tool `vibe-spec-intake <slug> "<intent>" --ai` to auto-generate a spec using the `claude` CLI.
+
 ## VCP rules (non-negotiable)
 
 - **Each AC = one machine-checkable test or explicit human-judged gate.** If you can't name the check, the AC is incomplete. `/vibe-verify` will block on ACs without tests.
