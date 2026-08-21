@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# vibe-spec-approve — bridge the Spec to the kit's hard gates.
+#
+# One command: takes a feature slug, flips its Spec status from
+# `awaiting-approval` to `in-progress`, and turns on the kit's enforcement
+# gates via `vibe-arm`. This is the kit's "yes, ship this Spec" button.
+#
+# Usage:
+#   vibe-spec-approve <slug>           # approve + arm
+#   vibe-spec-approve <slug> --no-arm  # approve only (kit stays in encouragement mode)
+#
+# Side effects:
+#   1. Edits docs/requirements/<slug>/spec.md (Status: awaiting-approval → in-progress).
+#   2. Writes .vibe-cache/spec-approved-<slug> (the human-blessing marker).
+#   3. Runs vibe-arm, unless --no-arm is passed.
+#
+# Idempotent. Refuses to flip if status is anything other than awaiting-approval
+# (so re-running on an in-progress Spec is a no-op, but a closed Spec stays closed).
+
+set -uo pipefail
+
+die() { echo "vibe-spec-approve: $*" >&2; exit 4; }
+
+SLUG=""
+NO_ARM=""
+for arg in "$@"; do
+  case "$arg" in
+    --no-arm) NO_ARM=1 ;;
+    --help|-h)
+      sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    -*) die "unknown flag: $arg" ;;
+    *) [ -z "$SLUG" ] && SLUG="$arg" || die "too many args" ;;
+  esac
+done
+
+[ -z "$SLUG" ] && die "usage: vibe-spec-approve <slug> [--no-arm]"
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$PROJECT_ROOT" 2>/dev/null || die "no project root"
+SPEC="docs/requirements/$SLUG/spec.md"
+
+[ -f "$SPEC" ] || die "spec not found: $SPEC"
+
+# Status check + flip in a single awk pass — portable across macOS/Linux
+# (macOS sed needs -i '' which is brittle; awk works the same on both).
+if grep -qF "awaiting-approval" "$SPEC"; then
+  awk '
+    /^[[:space:]]*\* \*\*Status:\*\*/ {
+      sub(/awaiting-approval/, "in-progress")
+    }
+    { print }
+  ' "$SPEC" > "$SPEC.tmp" && mv "$SPEC.tmp" "$SPEC"
+  echo "vibe-spec-approve: $SLUG → in-progress"
+elif grep -qF "in-progress" "$SPEC"; then
+  echo "vibe-spec-approve: $SLUG already in-progress (idempotent)"
+else
+  die "spec $SLUG status is not awaiting-approval — refusing to flip"
+fi
+
+# Record the blessing BEFORE arming — so the marker is durable even if
+# arming itself fails for some unrelated reason.
+mkdir -p .vibe-cache
+touch ".vibe-cache/spec-approved-$SLUG"
+
+if [ -z "$NO_ARM" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  bash "$SCRIPT_DIR/vibe-arm"
+fi

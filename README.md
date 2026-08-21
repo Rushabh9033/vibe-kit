@@ -59,6 +59,7 @@ The kit also ships **7 weapons** that turn "encouragement" into "enforcement." O
 
 - `vibe-arm` — turns on the full hard-gate suite for the current project
 - `vibe-disarm` — reverts
+- `vibe-spec-approve <slug>` — flips a Spec's status to `in-progress` **and auto-arms** the kit. The recommended "yes, ship this Spec" button on a fresh project. `--no-arm` skips arming.
 
 Once armed, the kit **blocks** the wrong thing from happening:
 
@@ -219,6 +220,7 @@ vibe-kit/
 │   │   ├── vibe-classify       ← diff → tiny|normal|large|critical
 │   │   ├── vibe-test           ← test oracle (lint/typecheck/unit/integration)
 │   │   ├── vibe-spec-intake    ← weapon 1: 1-line intent → spec with ACs
+│   │   ├── vibe-spec-approve   ← the bridge: flip status + auto-arm
 │   │   ├── vibe-claim-check    ← weapon 6: per-AC evidence at ship
 │   │   ├── vibe-arm            ← the ultimate weapon: arm all gates
 │   │   ├── vibe-init           ← scaffolds a project

@@ -26,6 +26,19 @@ The weapons are the kit's response to the 3 problems solo vibe-coders hit: half-
 
 **Off by default.** Arming a project is explicit. Run `vibe-arm` once. Run `vibe-disarm` to revert. Existing projects that haven't armed are unchanged.
 
+### Added — `vibe-spec-approve` (the auto-arm bridge)
+
+New command `kit/bin/vibe-spec-approve <slug> [--no-arm]` that turns Spec-approval into a one-command ritual:
+
+1. **Flips status** — `Status: awaiting-approval` → `Status: in-progress` in `docs/requirements/<slug>/spec.md`. Refuses any other source state (so a closed Spec stays closed; re-running on an in-progress Spec is a no-op).
+2. **Writes the blessing** — `.vibe-cache/spec-approved-<slug>` so other scripts (`/vibe-claim-check`) can reference the human approval without re-parsing the Spec.
+3. **Auto-arms the kit** — calls `vibe-arm` to turn on the hard gates. Skip with `--no-arm` if you want to keep vibe-kit in "encouragement" mode.
+
+The workflow is now: `vibe-spec-intake <slug> "<intent>"` → fill the ACs → `vibe-spec-approve <slug>` → start coding under the gates. No separate `vibe-arm` step on a fresh project. Idempotent.
+
+- `kit/bin/vibe-spec-approve` — new script (~70 lines, awk-based status flip for macOS/Linux portability, `set -uo pipefail`, friendly help/usage).
+- `tests/weapons/test-weapons.sh` — 11 new assertions covering status flip, auto-arm side effect, `--no-arm` skip, idempotency on re-run, refusal of non-awaiting-approval statuses, missing-slug error path.
+
 ### Tests
 - **`tests/weapons/test-weapons.sh`** — 29 assertions. Covers arm/disarm idempotency, every weapon's allowed/blocked paths, exit codes, stderr content, wiring into `.claude/settings.json`, and the AC-progress telemetry format.
 

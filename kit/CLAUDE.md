@@ -13,7 +13,7 @@ Before any non-trivial edit, run this gate:
 1. Is the work trivial? (`vibe-classify` → `tiny`) → proceed.
 2. Does an applicable Spec exist?
    - `Status: in-progress` → resume.
-   - `Status: awaiting-approval` → STOP. The user must flip it to `in-progress`.
+   - `Status: awaiting-approval` → STOP. The user must flip it to `in-progress` (recommended: `vibe-spec-approve <slug>` — it flips the status **and** auto-arms the gates so a fresh project is gated from the first commit).
    - `Status: draft` or no Spec on non-trivial work → enter Discovery (single source of truth: `prompts/00-anchor.md` § Discovery protocol), write `docs/requirements/<feature>/spec.md` from `kit/templates/requirements-spec.md`, set `Status: awaiting-approval`, **stop**.
 3. **Approval boundary:** the user is the only one who can flip `Status: awaiting-approval → in-progress`.
 

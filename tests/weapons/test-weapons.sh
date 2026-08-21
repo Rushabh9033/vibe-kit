@@ -280,6 +280,96 @@ else
   fail "no AC iteration — got: $(head -c 200 "$CLAIM_OUT")"
 fi
 
+# ---------- [10] vibe-spec-approve ----------
+
+hdr "[10] vibe-spec-approve — flips status + arms + idempotent"
+APPROVE="$KIT_ROOT/kit/bin/vibe-spec-approve"
+
+# Fresh fixture (no pre-existing spec) — intake creates it with awaiting-approval.
+d4="$(mktemp -d -t vibe-approve.XXXXXX)"
+(
+  cd "$d4"
+  git init -q
+  git config user.email t@t
+  git config user.name t
+  bash "$INTAKE" "auth" "users log in with email" >/dev/null 2>&1
+  bash "$APPROVE" "auth" >/dev/null 2>&1
+)
+[ -f "$d4/docs/requirements/auth/spec.md" ] && ok "spec.md exists after intake" \
+  || fail "spec.md missing after intake"
+grep -qF "in-progress" "$d4/docs/requirements/auth/spec.md" \
+  && ok "status flipped to in-progress" || fail "status not flipped"
+[ -f "$d4/.vibe-cache/armed" ] && ok "vibe-arm auto-fired (.vibe-cache/armed written)" \
+  || fail "vibe-arm did not fire"
+[ -f "$d4/.vibe-cache/spec-approved-auth" ] && ok "approval marker written" \
+  || fail "approval marker missing"
+grep -q "vibe-edit-gate" "$d4/.claude/settings.json" \
+  && ok "settings.json wired by arm" || fail "settings.json not wired"
+
+# --no-arm: status flips, marker written, arm skipped
+d5="$(mktemp -d -t vibe-approve-noarm.XXXXXX)"
+(
+  cd "$d5"
+  git init -q
+  git config user.email t@t
+  git config user.name t
+  bash "$INTAKE" "auth" "users log in" >/dev/null 2>&1
+  bash "$APPROVE" "auth" --no-arm >/dev/null 2>&1
+)
+grep -qF "in-progress" "$d5/docs/requirements/auth/spec.md" \
+  && ok "--no-arm: status flipped" || fail "--no-arm: status not flipped"
+[ -f "$d5/.vibe-cache/spec-approved-auth" ] \
+  && ok "--no-arm: approval marker written" || fail "--no-arm: marker missing"
+[ ! -f "$d5/.vibe-cache/armed" ] \
+  && ok "--no-arm: arm skipped (no .vibe-cache/armed)" \
+  || fail "--no-arm: arm fired (should not have)"
+
+# Idempotent: re-running on in-progress Spec must succeed
+d6="$(mktemp -d -t vibe-approve-idem.XXXXXX)"
+(
+  cd "$d6"
+  git init -q
+  git config user.email t@t
+  git config user.name t
+  bash "$INTAKE" "auth" "users log in" >/dev/null 2>&1
+  bash "$APPROVE" "auth" >/dev/null 2>&1 ; first_rc=$?
+  bash "$APPROVE" "auth" >/dev/null 2>&1 ; second_rc=$?
+  echo "$first_rc" > /tmp/.approve-first-rc
+  echo "$second_rc" > /tmp/.approve-second-rc
+)
+first_rc="$(cat /tmp/.approve-first-rc 2>/dev/null || echo unset)"
+second_rc="$(cat /tmp/.approve-second-rc 2>/dev/null || echo unset)"
+if [ "$first_rc" = "0" ] && [ "$second_rc" = "0" ]; then
+  ok "idempotent (both runs rc=0)"
+else
+  fail "idempotent broken (first=$first_rc second=$second_rc)"
+fi
+
+# Refuses to flip a Spec whose status is not awaiting-approval
+d7="$(mktemp -d -t vibe-approve-refuse.XXXXXX)"
+(
+  cd "$d7"
+  git init -q
+  git config user.email t@t
+  git config user.name t
+  mkdir -p docs/requirements/auth
+  printf '# Auth\n* **Status:** done\n' > docs/requirements/auth/spec.md
+  bash "$APPROVE" "auth" >/dev/null 2>&1 ; refuse_rc=$?
+  echo "$refuse_rc" > /tmp/.approve-refuse-rc
+)
+refuse_rc="$(cat /tmp/.approve-refuse-rc 2>/dev/null || echo unset)"
+[ "$refuse_rc" != "0" ] && ok "refuses to flip closed Spec (rc=$refuse_rc)" \
+  || fail "should refuse non-awaiting-approval status (rc=$refuse_rc)"
+
+# Missing slug → die
+APPROVE_BAD="$(
+  cd "$d4"
+  bash "$APPROVE" 2>/dev/null
+  echo $?
+)"
+[ "${APPROVE_BAD:-unset}" != "0" ] && ok "missing slug exits non-zero" \
+  || fail "missing slug should fail"
+
 # ---------- summary ----------
 
 echo
