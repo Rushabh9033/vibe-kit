@@ -72,11 +72,14 @@ Full decision tree: `kit/templates/spec-first-gate.md`.
 - `/vibe-init` — bootstrap current directory to VCP-grade
 - `/vibe-spec` — write per-feature spec from intake
 - `/vibe-plan` — write phased implementation plan from a spec
-- `/vibe-verify` — run verification ranks against current changes
+- `/vibe-verify` — mid-development contract check (fast keyword match)
+- `/vibe-claim-check` — **ship-time gate**, runs on every push via the pre-push hook. Demands per-AC evidence + passing tests.
 - `/vibe-ship` — ship a feature (CHANGELOG + handoff + ready-to-commit)
 - `/vibe-handoff` — write a session handoff doc
 - `/vibe-decide` — write an ADR
 - `/vibe-review-pr` — review a PR/branch with the AI-specific checklist
+
+Use `/vibe-verify` mid-development. Use `/vibe-claim-check` at the ship boundary (the pre-push hook enforces it).
 
 ## Memory hierarchy (broadest → most specific; later wins)
 

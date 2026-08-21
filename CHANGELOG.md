@@ -62,6 +62,27 @@ New directory `kit/templates/features/` with 10 fully-fleshed Spec templates cov
 - `kit/templates/features/README.md` — usage workflow + ranking rationale ("why these 10")
 - `README.md` — repo-level "Spec templates" subsection + tree entry
 
+### Changed — `/vibe-claim-check` is now the ship-time gate (not `/vibe-verify`)
+
+The kit's two verification commands now have distinct, complementary roles:
+
+| Command | When | What | Speed |
+|---|---|---|---|
+| `/vibe-verify` | Mid-development (every commit) | Keyword-based contract check — is there *some* evidence for each AC in the diff? | Fast (no test run) |
+| `/vibe-claim-check` | **Ship time (pre-push)** | Per-AC evidence + actually-run tests + diff overlap | Slow (runs full suite) |
+
+**What changed:**
+
+- `kit/bin/hooks/vibe-pre-push` now calls `vibe-claim-check` instead of `vibe-verify`. Every `git push` is now gated by the heavier per-AC evidence check, not just keyword matching.
+- `kit/commands/vibe-claim-check.md` — rewritten to make ship-time semantics explicit ("This is **the ship gate.**"), with the verify/claim-check comparison table.
+- `kit/commands/vibe-verify.md` — updated to clarify it's the mid-development contract checker, not the ship gate.
+- `kit/CLAUDE.md` + `kit/templates/CLAUDE.md` — slash command list now distinguishes verify (mid-dev) from claim-check (ship-time).
+- `README.md` — new "Ship — the actual gate" section with the two-commands-two-jobs table.
+
+**Why this matters:** verify was being overloaded — both mid-dev and ship-time, but it doesn't run tests, so it can PASS while tests are broken. Claim-check runs tests AND demands per-AC evidence. The pre-push gate now enforces the heavy version at the boundary where it matters, while keeping verify available as a fast mid-dev check.
+
+The `VIBE_SHIP_OVERRIDE=1` escape hatch still works (lifts PARTIAL only). `git push --no-verify` still skips the gate entirely.
+
 ### Tests
 - **`tests/weapons/test-weapons.sh`** — 29 assertions. Covers arm/disarm idempotency, every weapon's allowed/blocked paths, exit codes, stderr content, wiring into `.claude/settings.json`, and the AC-progress telemetry format.
 

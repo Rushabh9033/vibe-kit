@@ -61,9 +61,14 @@ It's honest about the difference between "I checked" and "I claim it works."
 
 ## When to use
 
-- After the Coder finishes a feature, before `/vibe-ship`.
-- Before claiming "done" on any user-visible feature.
+- **Mid-development** — after every commit, while iterating. Fast, no test run.
 - As a gate in PR review: paste the report into the PR description.
+- **Not at ship time** — use `/vibe-claim-check` for that. The pre-push hook
+  runs claim-check automatically.
+
+`vibe-verify` is the **fast contract checker**. `vibe-claim-check` is the
+**ship gate**. Use verify throughout development. The pre-push hook enforces
+claim-check, so verify becomes advisory at ship time.
 
 ## Usage
 

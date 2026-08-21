@@ -18,7 +18,8 @@ Canonical source for the gate: `kit/templates/spec-first-gate.md`.
 
 ## Claude Code specifics
 - Use plan mode (Shift+Tab) for any non-trivial change in /auth, /billing, /security.
-- Run `/vibe-verify` before claiming "done" on any user-visible feature.
+- Mid-development: run `/vibe-verify` (fast keyword check, no test run).
+- Ship time: `/vibe-claim-check` is the gate. The opt-in pre-push hook runs it automatically. Use `/vibe-verify` mid-development, NOT at ship time.
 - Run `/vibe-handoff` before ending any session that touched code.
 - Hooks active: format-on-edit (PostToolUse), guard-unsafe (PreToolUse on Bash), Stop-handoff prompt.
-- Slash commands global: `/vibe-init`, `/vibe-spec`, `/vibe-plan`, `/vibe-verify`, `/vibe-ship`, `/vibe-handoff`, `/vibe-decide`, `/vibe-review-pr`.
+- Slash commands global: `/vibe-init`, `/vibe-spec`, `/vibe-plan`, `/vibe-verify`, `/vibe-claim-check`, `/vibe-ship`, `/vibe-handoff`, `/vibe-decide`, `/vibe-review-pr`.

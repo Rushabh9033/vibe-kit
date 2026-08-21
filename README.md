@@ -170,7 +170,7 @@ Template: [`kit/templates/requirements-spec.md`](kit/templates/requirements-spec
 
 Two Specs exist at different levels — see Templates below.
 
-## Verify — the actual gate
+## Verify — the contract checker (mid-development)
 
 `vibe-verify` extracts ACs from your Spec and checks the git diff against each. Honest status model:
 
@@ -191,6 +191,31 @@ chmod +x .git/hooks/vibe-pre-push
 ```
 
 After install, every `git push` runs `vibe-verify` first. Exit non-zero refuses the push. `git push --no-verify` skips it (documented escape hatch).
+
+`vibe-verify` is **fast and heuristic** — runs no tests, just keyword matches. Use it mid-development, every commit.
+
+## Ship — the actual gate
+
+`/vibe-claim-check` is the ship-time gate. It runs the **full test suite** and demands per-AC evidence (test path + diff overlap) — AC by AC, not just keyword-matched.
+
+| Status | Meaning | Exit code |
+|---|---|---|
+| **PASS** | every AC has a passing test + visible diff | 0 |
+| **PARTIAL** | some ACs lack evidence | 2 (BLOCK) |
+| **FAIL** | tests didn't pass | 1 |
+
+`VIBE_SHIP_OVERRIDE=1` lifts BLOCK (2 → 0). It cannot lift FAIL.
+
+The pre-push hook above runs `vibe-claim-check` (not `vibe-verify`) by default. Install it once; every `git push` is gated by claim-check.
+
+### Two commands, two jobs
+
+| Command | When | What | Speed |
+|---|---|---|---|
+| `/vibe-verify` | Mid-development (every commit) | Keyword-based contract check | Fast (no test run) |
+| `/vibe-claim-check` | **Ship time (pre-push)** | Per-AC evidence + actually-run tests | Slow (runs full suite) |
+
+Use verify throughout development. The pre-push hook enforces claim-check at ship time.
 
 ## Templates
 
