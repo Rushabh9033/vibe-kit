@@ -39,6 +39,29 @@ The workflow is now: `vibe-spec-intake <slug> "<intent>"` → fill the ACs → `
 - `kit/bin/vibe-spec-approve` — new script (~70 lines, awk-based status flip for macOS/Linux portability, `set -uo pipefail`, friendly help/usage).
 - `tests/weapons/test-weapons.sh` — 11 new assertions covering status flip, auto-arm side effect, `--no-arm` skip, idempotency on re-run, refusal of non-awaiting-approval statuses, missing-slug error path.
 
+### Added — Spec template gallery (10 copy-paste-ready Specs)
+
+New directory `kit/templates/features/` with 10 fully-fleshed Spec templates covering the most-bug-prone features a solo dev ships. Each template is a complete Spec — Goal, ACs (each with `Verification:` block), Constraints, Edge Cases (Mandatory 11 + domain-specific), Non-Goals, and Verification steps. Copy one, edit the slug + Goal, run `vibe-spec-approve <slug>` — the kit arms in the same step.
+
+| Template | Why it's here |
+|---|---|
+| `webhook-receiver.md` | The canonical README pain case: signing, idempotency, retries, DLQ. Every "12% of events dropped" starts here. |
+| `auth-email-password.md` | Argon2id hashing, email verification, rate-limited login, password reset. |
+| `auth-oauth-social.md` | OAuth2 / OIDC with state CSRF, JWKS verification, account linking. |
+| `billing-stripe.md` | Hosted checkout, subscription webhooks, dunning, proration. |
+| `crud-with-permissions.md` | RBAC at the data layer (defense in depth), soft delete, owner transfer. |
+| `search-full-text.md` | Postgres `tsvector` for v1, with filters + pagination. |
+| `file-upload-storage.md` | Pre-signed S3 URLs, direct browser-to-S3, virus scan, MIME validation. |
+| `email-transactional.md` | Queue-based, template-in-code, bounce handling, CAN-SPAM. |
+| `rate-limiting.md` | Token bucket per user/IP/API-key, headers, 429 + Retry-After. |
+| `audit-log.md` | Append-only, tamper-evident, 7-year cold retention. |
+
+**Why this matters:** the Spec is the bottleneck. Most solo devs stare at a blank `requirements-spec.md` for 20 minutes and give up, then ship unstated requirements. The gallery drops the cost of writing a Spec from 20 minutes to 20 seconds. Each template is a working example of what good looks like.
+
+- `kit/templates/features/` — new directory with 10 templates + `README.md` gallery index
+- `kit/templates/features/README.md` — usage workflow + ranking rationale ("why these 10")
+- `README.md` — repo-level "Spec templates" subsection + tree entry
+
 ### Tests
 - **`tests/weapons/test-weapons.sh`** — 29 assertions. Covers arm/disarm idempotency, every weapon's allowed/blocked paths, exit codes, stderr content, wiring into `.claude/settings.json`, and the AC-progress telemetry format.
 

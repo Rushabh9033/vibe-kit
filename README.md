@@ -108,6 +108,19 @@ Either way you end up with a Spec. Either way, you approve it before code happen
 
 **See it in action**: [`examples/todo-cli/`](examples/todo-cli/) is a runnable demo. Spec, implementation, verify output, a deliberate ship-blocker, and the fix.
 
+### Spec templates — the feature gallery
+
+Don't start from a blank file. The kit ships **10 copy-paste-ready Specs** for the most common features solo devs ship: webhook receivers, auth, billing, CRUD-with-permissions, search, file upload, email, rate limiting, OAuth, audit logs. Each one is a complete, well-shaped Spec with real ACs and real Verification blocks — not stubs.
+
+```bash
+cp kit/templates/features/webhook-receiver.md \
+   docs/requirements/<your-slug>/spec.md
+# edit the slug, Goal, and any ACs that don't match
+vibe-spec-approve <your-slug>     # approve + arm the kit
+```
+
+Gallery: [`kit/templates/features/`](kit/templates/features/). See [`kit/templates/features/README.md`](kit/templates/features/README.md) for the full table + workflow.
+
 ## What this kit does NOT do
 
 Let's set expectations:
@@ -231,6 +244,7 @@ vibe-kit/
 │   ├── rules/                  ← modular rules (security, verify, cost)
 │   ├── installers/             ← per-tool skill packs
 │   └── templates/              ← Spec, plan, ADR, handoff, CHANGELOG
+│       └── features/           ← 10 copy-paste-ready Spec templates
 ├── install/                    ← per-tool install guides
 ├── skills/vibe-kit/            ← packaged Claude Code Skill
 ├── docs/                       ← playbook, architecture, ceremony levels
