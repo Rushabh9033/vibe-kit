@@ -44,6 +44,15 @@ Four steps. We tried three. We tried two. We keep coming back to four.
 
 For larger work, supporting workflows exist (Plan, Decide, Handoff). Use them when the work earns them. Not before.
 
+### The two layers under the hood
+
+Two deterministic runtime layers keep the AI honest while it codes and after:
+
+- **`/vibe-test`** — runs your project's tests across the configured ranks (lint, typecheck, unit, integration) and reports honest PASS / FAIL / BLOCK / UNVERIFIED status. No AI; auto-detects pytest, unittest, npm test, jest, vitest. Pre-push hook material.
+- **prep-room hook** — before every Edit/Write, the kit surfaces recent commits on the file, the affected tests, and the relevant Spec ACs into the Coder's view. The Coder can't quietly forget what it was supposed to be building.
+
+Both layers are spec'd together in [`docs/superpowers/specs/2026-08-21-smart-vibe-coder-design.md`](docs/superpowers/specs/2026-08-21-smart-vibe-coder-design.md). Both are pure determinism — no AI calls.
+
 ### Spec-first. Planner optional.
 
 The Spec is mandatory. The Planner is optional.
@@ -191,8 +200,9 @@ vibe-kit/
 │   │   ├── vibe-detect-tool    ← auto-detect claude-code|cursor|aider|...
 │   │   ├── vibe-verify         ← Spec ↔ code ↔ tests contract checker
 │   │   ├── vibe-classify       ← diff → tiny|normal|large|critical
+│   │   ├── vibe-test           ← test oracle (lint/typecheck/unit/integration)
 │   │   ├── vibe-init           ← scaffolds a project
-│   │   └── hooks/              ← format-on-edit, guard-unsafe, handoff, pre-push
+│   │   └── hooks/              ← prep-room, guard-unsafe, format-on-edit, handoff, pre-push
 │   ├── commands/               ← /vibe-* slash commands
 │   ├── rules/                  ← modular rules (security, verify, cost)
 │   ├── installers/             ← per-tool skill packs
@@ -202,7 +212,7 @@ vibe-kit/
 ├── docs/                       ← playbook, architecture, ceremony levels
 ├── examples/                   ← intake, spec, plan, handoff samples
 │   └── todo-cli/               ← runnable Spec → Code → Verify → Ship demo
-└── tests/                      ← verify + classify tests
+└── tests/                      ← verify, classify, vibe-test, prep-room tests
 ```
 
 ## Two entry points, one Spec

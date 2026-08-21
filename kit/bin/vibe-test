@@ -1,0 +1,271 @@
+#!/usr/bin/env bash
+# vibe-test — run the project's test suite across configured ranks.
+#
+# Mirrors the exit-code discipline of vibe-verify:
+#   0  PASS       — all detected ranks pass
+#   1  FAIL       — at least one rank failed
+#   2  BLOCK      — runner missing or partial; needs human review
+#   3  UNVERIFIED — no test runner detected
+#   4  config error (bad flags, etc.)
+#
+# Deterministic. No AI. Auto-detects:
+#   - Python: pytest, unittest (fallback)
+#   - Node:   npm test, jest, vitest
+#
+# Usage:
+#   vibe-test                     # run all detected ranks
+#   vibe-test --rank=lint         # specific rank: lint|typecheck|unit|integration
+#   vibe-test --json              # machine-parseable output
+#   vibe-test --fix               # run lint --fix if available (opt-in)
+#   vibe-test --verbose           # show full output from each rank
+#
+# Ranks (v0.1):
+#   1 lint       — ruff / eslint / prettier --check
+#   1 typecheck  — mypy / tsc --noEmit
+#   2 unit       — pytest / npm test / jest / vitest
+#   2 integration— pytest tests/integration / npm run test:integration
+#                 (only if the integration folder/script exists)
+
+set -uo pipefail
+
+# ---------- helpers ----------
+die() { echo "vibe-test: $*" >&2; exit 4; }
+
+PROJECT_ROOT="$(pwd)"
+PYPROJECT="$PROJECT_ROOT/pyproject.toml"
+PACKAGE_JSON="$PROJECT_ROOT/package.json"
+
+RANK_FILTER=""
+JSON=0
+FIX=0
+VERBOSE=0
+
+# detector → emitted:
+#   <rank>:<runner>:<command-or-empty>
+# e.g. "lint:ruff:ruff check ."  /  "unit:pytest:pytest -q"
+declare -a PLANS=()
+
+# result store: rank|status|note
+declare -a RESULTS=()
+
+# ---------- args ----------
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --rank=*) RANK_FILTER="${1#*=}" ;;
+    --json)   JSON=1 ;;
+    --fix)    FIX=1 ;;
+    --verbose) VERBOSE=1 ;;
+    -h|--help)
+      sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) die "unknown flag: $1 (use --rank=lint|typecheck|unit|integration, --json, --fix, --verbose)" ;;
+  esac
+  shift
+done
+
+# ---------- detection ----------
+#
+# Pure-function: each `detect_*` appends to PLANS. Detection does NOT
+# run any tool; it only inspects files. A plan with empty command means
+# "we know this rank exists; let the user run it manually" → BLOCK.
+
+detect_python_lint() {
+  if [ -f "$PROJECT_ROOT/.ruff.toml" ] || [ -f "$PROJECT_ROOT/ruff.toml" ] || \
+     grep -qE '^\[tool\.ruff\]' "$PYPROJECT" 2>/dev/null; then
+    command -v ruff >/dev/null 2>&1 && PLANS+=("lint:ruff:ruff check${FIX:+ --fix} .") || PLANS+=("lint:ruff:")
+    return
+  fi
+  if [ -f "$PROJECT_ROOT/.flake8" ] || [ -f "$PROJECT_ROOT/setup.cfg" ] || \
+     grep -qE '^\[tool\.flake8\]' "$PYPROJECT" 2>/dev/null; then
+    command -v flake8 >/dev/null 2>&1 && PLANS+=("lint:flake8:flake8 .") || PLANS+=("lint:flake8:")
+    return
+  fi
+}
+
+detect_python_typecheck() {
+  grep -qE '^\[tool\.mypy\]' "$PYPROJECT" 2>/dev/null \
+    && command -v mypy >/dev/null 2>&1 && PLANS+=("typecheck:mypy:mypy .") \
+    && return
+  if grep -qE '^\[tool\.pyright\]' "$PYPROJECT" 2>/dev/null; then
+    command -v pyright >/dev/null 2>&1 && PLANS+=("typecheck:pyright:pyright") || PLANS+=("typecheck:pyright:")
+    return
+  fi
+}
+
+detect_python_unit() {
+  if grep -qE 'pytest|pyproject' "$PYPROJECT" 2>/dev/null && \
+     [ -d "$PROJECT_ROOT/tests" ]; then
+    if grep -qE '^\[tool\.pytest' "$PYPROJECT" 2>/dev/null || \
+       [ -f "$PROJECT_ROOT/pytest.ini" ] || [ -f "$PROJECT_ROOT/conftest.py" ]; then
+      command -v pytest >/dev/null 2>&1 && PLANS+=("unit:pytest:pytest -q") || PLANS+=("unit:pytest:")
+      return
+    fi
+  fi
+  if [ -d "$PROJECT_ROOT/tests" ] && ls "$PROJECT_ROOT/tests"/test_*.py >/dev/null 2>&1; then
+    command -v pytest >/dev/null 2>&1 && PLANS+=("unit:pytest:pytest -q") \
+      || command -v python3 >/dev/null 2>&1 && PLANS+=("unit:unittest:python3 -m unittest discover -s tests") \
+      || PLANS+=("unit:unittest:")
+  fi
+}
+
+detect_python_integration() {
+  if [ -d "$PROJECT_ROOT/tests/integration" ] || [ -d "$PROJECT_ROOT/integration_tests" ]; then
+    command -v pytest >/dev/null 2>&1 && PLANS+=("integration:pytest:pytest -q tests/integration") \
+      || PLANS+=("integration:pytest:")
+  fi
+}
+
+detect_node_lint() {
+  [ -f "$PACKAGE_JSON" ] || return 0
+  if grep -qE '"lint"\s*:' "$PACKAGE_JSON" 2>/dev/null; then
+    PLANS+=("lint:npm:npm run --silent lint")
+    return
+  fi
+  if [ -f "$PROJECT_ROOT/.eslintrc.json" ] || [ -f "$PROJECT_ROOT/.eslintrc.js" ] || \
+     [ -f "$PROJECT_ROOT/eslint.config.js" ] || [ -f "$PROJECT_ROOT/eslint.config.mjs" ]; then
+    command -v npx >/dev/null 2>&1 && PLANS+=("lint:eslint:npx --no-install eslint . 2>/dev/null || echo eslint_not_in_deps") || PLANS+=("lint:eslint:")
+    return
+  fi
+  if grep -qE '"prettier"' "$PACKAGE_JSON" 2>/dev/null && [ -f "$PROJECT_ROOT/.prettierrc" -o -f "$PROJECT_ROOT/.prettierrc.json" ]; then
+    command -v npx >/dev/null 2>&1 && PLANS+=("lint:prettier:npx --no-install prettier --check . 2>/dev/null || echo prettier_not_in_deps") || PLANS+=("lint:prettier:")
+  fi
+}
+
+detect_node_typecheck() {
+  [ -f "$PACKAGE_JSON" ] || return 0
+  if [ -f "$PROJECT_ROOT/tsconfig.json" ]; then
+    command -v npx >/dev/null 2>&1 && PLANS+=("typecheck:tsc:npx --no-install tsc --noEmit") || PLANS+=("typecheck:tsc:")
+    return
+  fi
+}
+
+detect_node_unit() {
+  [ -f "$PACKAGE_JSON" ] || return 0
+  if grep -qE '"test"\s*:' "$PACKAGE_JSON" 2>/dev/null; then
+    PLANS+=("unit:npm:npm test --silent")
+    return
+  fi
+  if grep -qE '"vitest"' "$PACKAGE_JSON" 2>/dev/null; then
+    command -v npx >/dev/null 2>&1 && PLANS+=("unit:vitest:npx --no-install vitest run") || PLANS+=("unit:vitest:")
+    return
+  fi
+  if grep -qE '"jest"' "$PACKAGE_JSON" 2>/dev/null; then
+    command -v npx >/dev/null 2>&1 && PLANS+=("unit:jest:npx --no-install jest --silent") || PLANS+=("unit:jest:")
+  fi
+}
+
+detect_node_integration() {
+  [ -f "$PACKAGE_JSON" ] || return 0
+  if grep -qE '"test:integration"\s*:' "$PACKAGE_JSON" 2>/dev/null; then
+    PLANS+=("integration:npm:npm run --silent test:integration")
+  fi
+}
+
+# Run all detectors.
+detect_python_lint
+detect_python_typecheck
+detect_python_unit
+detect_python_integration
+detect_node_lint
+detect_node_typecheck
+detect_node_unit
+detect_node_integration
+
+# ---------- filtering ----------
+if [ -n "$RANK_FILTER" ]; then
+  FILTERED=()
+  for p in "${PLANS[@]}"; do
+    case "$p" in
+      "$RANK_FILTER":*) FILTERED+=("$p") ;;
+    esac
+  done
+  PLANS=("${FILTERED[@]}")
+fi
+
+# ---------- execution ----------
+run_plan() {
+  local plan="$1"
+  local rank runner cmd
+  IFS=':' read -r rank runner cmd <<< "$plan"
+
+  local status="PASS" note=""
+  if [ -z "$cmd" ]; then
+    # Empty command → runner detected in config but tool not installed.
+    status="BLOCK"
+    note="runner=$runner configured but executable not found in PATH"
+  else
+    if [ "$VERBOSE" -eq 1 ]; then
+      echo "  → $cmd"
+      bash -c "$cmd"
+      rc=$?
+    else
+      bash -c "$cmd" >/tmp/vibe-test.$$.out 2>&1
+      rc=$?
+    fi
+    if [ "$rc" -ne 0 ]; then
+      status="FAIL"
+      note="rc=$rc"
+    fi
+  fi
+
+  RESULTS+=("$rank|$status|$note")
+}
+
+if [ "${#PLANS[@]}" -eq 0 ]; then
+  RESULTS=("__all__|UNVERIFIED|no test runner detected (looked for pytest, unittest, npm test, jest, vitest)")
+fi
+
+# Use the expansion-with-default pattern so empty arrays don't trigger
+# "unbound variable" under `set -u`.
+for p in ${PLANS[@]+"${PLANS[@]}"}; do
+  run_plan "$p"
+done
+
+# ---------- aggregate ----------
+final_status="PASS"
+for r in "${RESULTS[@]}"; do
+  IFS='|' read -r _rank status _note <<< "$r"
+  case "$status" in
+    FAIL)     final_status="FAIL"; break ;;
+    BLOCK)    [ "$final_status" = "PASS" ] && final_status="BLOCK" ;;
+    UNVERIFIED) final_status="UNVERIFIED" ;;
+  esac
+done
+
+# ---------- output ----------
+if [ "$JSON" -eq 1 ]; then
+  printf '{"status":"%s","results":[' "$final_status"
+  first=1
+  for r in "${RESULTS[@]}"; do
+    IFS='|' read -r rank status note <<< "$r"
+    [ "$first" -eq 0 ] && printf ','
+    printf '{"rank":"%s","status":"%s","note":"%s"}' "$rank" "$status" "$note"
+    first=0
+  done
+  printf ']}\n'
+else
+  echo "vibe-test: $final_status"
+  echo
+  for r in "${RESULTS[@]}"; do
+    IFS='|' read -r rank status note <<< "$r"
+    printf '  %-12s %-6s %s\n' "$rank" "$status" "$note"
+  done
+  if [ "$VERBOSE" -eq 0 ] && [ "$final_status" != "PASS" ]; then
+    if [ -f /tmp/vibe-test.$$.out ]; then
+      echo
+      echo "  --- last rank output (top 30 lines) ---"
+      head -30 /tmp/vibe-test.$$.out | sed 's/^/  /'
+    fi
+  fi
+fi
+
+[ -f /tmp/vibe-test.$$.out ] && rm -f /tmp/vibe-test.$$.out
+
+case "$final_status" in
+  PASS) exit 0 ;;
+  FAIL) exit 1 ;;
+  BLOCK) exit 2 ;;
+  UNVERIFIED) exit 3 ;;
+  *) exit 4 ;;
+esac

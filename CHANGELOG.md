@@ -5,6 +5,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Added — Smart Vibe Coder (v0.1)
+The kit now ships two deterministic runtime layers: a **test oracle** that runs the project's tests across configured ranks with honest exit codes, and a **prep-room** PreToolUse hook that surfaces relevant context (recent commits, affected tests, Spec ACs) into the Coder's view before each Edit/Write. Both layers are pure determinism, no AI calls. See `docs/superpowers/specs/2026-08-21-smart-vibe-coder-design.md`.
+
+- **`kit/bin/vibe-test`** — deterministic test runner. Auto-detects Python (`pytest`, `unittest`) and Node (`npm test`, `vitest`, `jest`). Ranks: `lint` (ruff/eslint/prettier), `typecheck` (mypy/tsc), `unit`, `integration`. Exit codes mirror `vibe-verify`: PASS=0, FAIL=1 (uncatchable), BLOCK=2 (liftable with `VIBE_SHIP_OVERRIDE=1`), UNVERIFIED=3 (no runner detected). `--json` for CI consumption, `--rank=<name>` for filtering, `--fix` to auto-fix lint.
+- **`kit/bin/hooks/prep-room.sh`** — PreToolUse hook for `Edit|Write|MultiEdit`. Reads the JSON tool_input from stdin, looks up the file's recent commits (`git log --oneline -3`), affected tests (same dir + parallel `tests/<leaf>/` + mirror `tests/<stem>/`), and the relevant feature's Spec ACs (`docs/requirements/<feature>/spec.md`). Output goes to stdout; Claude Code surfaces it to the Coder as additional context. Hard rule: <500ms per run. Silent on no-op. Exits 0 always (the Coder is never blocked).
+- **`kit/commands/vibe-test.md`** — `/vibe-test` slash command. Same shape as `/vibe-verify`: when/what/usage/limits.
+- **Settings wiring** — `kit/settings.json` and `kit/bin/vibe-init`'s `.claude/settings.json` render now declare the prep-room hook for `Edit|Write|MultiEdit`. `vibe-install` copies `prep-room.sh` along with the other hooks.
+- **`tests/vibe-test/test-vibe-test.sh`** — 10 assertions. Covers all four exit codes (PASS / FAIL / BLOCK / UNVERIFIED), `--json` shape, `--rank` filter, `--help` banner. Self-contained; builds fixtures in `mktemp -d` and cleans on EXIT.
+- **`tests/hooks/test-prep-room.sh`** — 21 assertions. Covers full fixture (commits + tests + ACs all surface), new-file fallback (no commits), no-spec fallback (silent on ACs), no-git graceful fallback, empty-stdin silent exit, CLI arg fallback for testing, perf (<500ms hard limit), and settings.json wiring.
+
+### Fixed — prep-room SIGPIPE under `set -o pipefail`
+The first cut of `prep-room.sh` was silent on real fixtures. Two pipelines tripped on `set -o pipefail`:
+1. `git log | grep -q .` — `grep -q` exits with SIGPIPE (rc=141) once it finds its first match, but `git log` keeps writing; pipefail promotes that to a non-zero pipeline rc and the `if` silently evaluates FALSE.
+2. `awk | grep | head` — same trap. `head` SIGPIPEs the upstream on the 9th line.
+
+Both pipelines were rewritten to capture first, then trim: `RECENT="$(git log ...)"` and `ACS="$(awk ... | grep ...)"` followed by a single `head`/`sed` on the variable. Also replaced BWK awk's `/start/,/end/` range pattern with a flag pattern — on macOS the range pattern stops at the start line and silently drops every AC line if the end pattern never appears in the file. Plus widened the test-search to also check the parallel `tests/<leaf>/` directory (more realistic — tests rarely live next to source) and added de-duplication so overlapping search roots don't surface the same file twice.
+
 ### Fixed — runtime propagation of the Spec-first gate
 - **`kit/CLAUDE.md`** — added a "Spec-first gate (run at every task start)" section before Pre-flight. This file is copied verbatim to every project's `AGENTS.md` by `vibe-install:223` and to the global `~/.claude/CLAUDE.md` by `vibe-install:156`. The new section points at `kit/templates/spec-first-gate.md` as the canonical decision tree and summarizes the 3-step gate (trivial→proceed; awaiting-approval→halt; otherwise→Discovery then write Spec with `Status: awaiting-approval`). **Approval boundary preserved.**
 - **`kit/bin/vibe-init` `render("CLAUDE.md")`** — added a one-line Spec-first gate pointer to the inline string that generates project `CLAUDE.md`. References `prompts/00-anchor.md § Discovery protocol` and `kit/templates/spec-first-gate.md`. Does NOT duplicate the full decision tree; the inline string stays terse.

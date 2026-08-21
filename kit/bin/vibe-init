@@ -139,6 +139,12 @@ def render(name: str, stack: str) -> str:
         "hooks": [
           {"type":"command","command":"~/.claude/vibe-kit/bin/hooks/guard-unsafe.sh"}
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {"type":"command","command":"~/.claude/vibe-kit/bin/hooks/prep-room.sh"}
+        ]
       }
     ],
     "Stop": [
