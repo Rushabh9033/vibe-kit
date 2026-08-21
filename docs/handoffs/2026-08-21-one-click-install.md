@@ -91,6 +91,31 @@ That's a real lesson: when a test could touch `~/.zshrc`, redirect HOME.
 - A one-command "fresh-project bootstrap": `vibe-install --bootstrap`
   that runs `vibe-spec-intake --ai` + `vibe-arm` in sequence. Spec-first.
 
+## Fix landed (post-ship)
+
+**Non-interactive shells now auto-edit rcfile.** The previous install.sh
+required `--yes` even when stdin was not a TTY — the very case that
+`curl ... | bash` produces. That defeated the whole point of one-click.
+
+New contract:
+- TTY + no `--yes` → prompt (interactive shell)
+- Non-TTY (curl|bash, CI) → auto-edit (user consented by running the one-liner)
+- `--no-path-edit` → never touches rcfile
+- `--yes` on TTY → also auto-edits
+
+Test coverage: 2 new assertions in `tests/weapons/test-install-oneclick.sh`
+(simulates `curl | bash` via stdin redirect + checks rcfile marker present).
+
+**Discovered while shipping:** the user's own install of vibe-kit at
+`~/.claude/vibe-kit/bin/` silently shadows `test-pre-push.sh` CASE 6
+("missing claim-check"). The hook's fallback path
+`$HOME/.claude/vibe-kit/bin/vibe-claim-check` is satisfied by a real
+install on the test host, and the test fails its missing-diagnostic
+assertion. Fixed by redirecting HOME to an empty sandbox dir for every
+`run_hook` invocation. Same shadowing pattern as spec-intake-ai — a
+recurring test-flake class that probably deserves a project-level rule
+("isolate the host env in weapon tests").
+
 ## For the next session
 
 If you extend the installer:
